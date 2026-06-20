@@ -1,0 +1,122 @@
+services:
+  openclaw-vibestack:
+    image: ${OPENCLAW_IMAGE:-vibestack-openclaw:latest}
+    build:
+      context: .
+      args:
+        OPENCLAW_REF: ${OPENCLAW_REF:-main}
+        # Backends de modelos locais — o ./install.sh grava estes no .env.
+        # Baixa-se APENAS o que estiver 'true'. O instalado sobe no boot.
+        INSTALL_OLLAMA: ${INSTALL_OLLAMA:-true}
+        INSTALL_LMSTUDIO: ${INSTALL_LMSTUDIO:-false}
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      #- HOME=/root
+      - NODE_ENV=production
+      - TERM=xterm-256color
+      - OPENCLAW_GATEWAY_BIND=${OPENCLAW_GATEWAY_BIND}
+      - OPENCLAW_GATEWAY_PORT=${OPENCLAW_GATEWAY_PORT}
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
+      - GOG_KEYRING_PASSWORD=${GOG_KEYRING_PASSWORD}
+      - OLLAMA_MODELS=/var/lib/ollama
+      - OLLAMA_AUTO_PULL_MODEL=${OLLAMA_AUTO_PULL_MODEL:-}
+      # Meta Ads CLI oficial le ACCESS_TOKEN/AD_ACCOUNT_ID; mantemos META_ACCESS_TOKEN
+      # como alias historico para o .env nao mudar.
+      - ACCESS_TOKEN=${META_ACCESS_TOKEN}
+      - AD_ACCOUNT_ID=${META_AD_ACCOUNT_ID:-}
+      - META_ACCESS_TOKEN=${META_ACCESS_TOKEN}
+      # AtlasCloud — MCP oficial (hub de modelos). Auth so' por API key via env.
+      - ATLASCLOUD_API_KEY=${ATLASCLOUD_API_KEY:-}
+      - PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      # Hermes — api_server OpenAI-compatible (alternativa ao OpenClaw).
+      # API_SERVER_KEY e' obrigatorio pro gateway subir o servidor na 8642.
+      # As tools (meta-ads/media-editor) reusam as vars Meta/B2 ja definidas acima.
+      - API_SERVER_KEY=${HERMES_API_SERVER_KEY:-}
+      - HERMES_API_PORT=${HERMES_API_PORT:-8642}
+      # O api_server (e demais canais) passa pela autorizacao de usuario do
+      # gateway. Sem allowlist o default e' NEGAR (erro "not authorized"). Como
+      # quem fala pelo WhatsApp ja' e' filtrado pelo bridge (WA_BRIDGE_ALLOWED_NUMBERS),
+      # liberamos o gateway. Controle real do canal = WA_BRIDGE_ALLOWED_NUMBERS.
+      - GATEWAY_ALLOW_ALL_USERS=${GATEWAY_ALLOW_ALL_USERS:-true}
+      # Dashboard web do Hermes (pagina de gestao/chat) — porta separada da API.
+      - HERMES_WEB_PORT=${HERMES_WEB_PORT:-9119}
+      # WhatsApp via GOWA — o middleware MCP alcanca a API pelo DNS de
+      # servico do compose (http://gowa:3000).
+      - GOWA_BASE_URL=http://gowa:3000
+      - GOWA_BASIC_AUTH=${GOWA_BASIC_AUTH:-}
+      - GOWA_DEVICE_ID=${GOWA_DEVICE_ID:-}
+      # Auto-aprovacao de comandos (canal headless trava sem isso -> timeout). off|smart|manual.
+      - HERMES_APPROVALS_MODE=${HERMES_APPROVALS_MODE:-off}
+      # Bridge inbound do WhatsApp (webhook do Evolution -> agente -> resposta).
+      # WA_BRIDGE_AGENT: quem responde o canal — 'hermes' (api_server) ou 'openclaw'
+      # (CLI `openclaw agent`). WA_BRIDGE_ALLOWED_NUMBERS: CSV de numeros que podem
+      # falar com o agente (vazio = qualquer um). Recomendado preencher.
+      - WA_BRIDGE_AGENT=${WA_BRIDGE_AGENT:-hermes}
+      - WA_BRIDGE_OPENCLAW_AGENT=${WA_BRIDGE_OPENCLAW_AGENT:-}
+      - WA_BRIDGE_PORT=${WA_BRIDGE_PORT:-8765}
+      - WA_BRIDGE_ALLOWED_NUMBERS=${WA_BRIDGE_ALLOWED_NUMBERS:-}
+      # Tarefas longas (gerar criativo etc.): timeout do agente e aviso de "processando".
+      - WA_BRIDGE_UPSTREAM_TIMEOUT=${WA_BRIDGE_UPSTREAM_TIMEOUT:-0}
+      - WA_BRIDGE_ACK_AFTER=${WA_BRIDGE_ACK_AFTER:-20}
+    volumes:
+      # UM mount só, abrangendo tudo do OpenClaw
+      - ${OPENCLAW_DATA_DIR}:/root/.openclaw
+      # Ollama em mount separado (faz sentido — outro app)
+      - ${OLLAMA_DATA_DIR}:/var/lib/ollama
+      # LM Studio — persiste SO' os modelos (o engine/CLI ficam na imagem, igual ao
+      # Ollama que persiste so' /var/lib/ollama). So' tem efeito se INSTALL_LMSTUDIO=true.
+      - ${LMSTUDIO_DATA_DIR:-/root/.lmstudio}:/root/.lmstudio/models
+      # Hermes — HERMES_HOME (config.yaml, .env, sessions, skills, memories).
+      # Persistente pra que a config do provider editada pelo usuario sobreviva a rebuilds.
+      # Default /root/.hermes funciona na VPS (HOME=/root); install.sh ajusta no Mac/Windows.
+      - ${HERMES_DATA_DIR:-/root/.hermes}:/root/.hermes
+      # Higgsfield CLI — token do `higgsfield auth login` (~/.higgsfield).
+      # Persistente pra que a sessao sobreviva a restart/rebuild (aluno loga 1x).
+      - ${HIGGSFIELD_DATA_DIR:-/root/.higgsfield}:/root/.higgsfield
+    ports:
+      - "127.0.0.1:${OPENCLAW_GATEWAY_PORT}:18789"
+      # Loopback do host pra alcancar o ollama interno (opcional, SSH tunnel):
+      #   ssh -N -L 11434:127.0.0.1:11434 root@VPS
+      - "127.0.0.1:11434:11434"
+      # LM Studio — API OpenAI-compat (so' util se INSTALL_LMSTUDIO=true). SSH tunnel:
+      #   ssh -N -L 1234:127.0.0.1:1234 root@VPS  -> http://localhost:1234/v1
+      - "127.0.0.1:1234:1234"
+      # Hermes — API OpenAI-compatible (porta separada, coexiste com o OpenClaw):
+      #   ssh -N -L 8642:127.0.0.1:8642 root@VPS  -> http://localhost:8642/v1
+      - "127.0.0.1:${HERMES_API_PORT:-8642}:8642"
+      # Hermes — dashboard web (pagina de gestao/chat):
+      #   ssh -N -L 9119:127.0.0.1:9119 root@VPS  -> http://localhost:9119
+      - "127.0.0.1:${HERMES_WEB_PORT:-9119}:9119"
+    command:
+      - "openclaw"
+      - "gateway"
+      - "--bind"
+      - "${OPENCLAW_GATEWAY_BIND}"
+      - "--port"
+      - "${OPENCLAW_GATEWAY_PORT}"
+      - "--allow-unconfigured"
+
+  # ============================================================
+  # WhatsApp backend — GOWA (Go WhatsApp Web Multi-Device).
+  # O container openclaw-vibestack alcança a API por http://gowa:3000.
+  # ============================================================
+  gowa:
+    image: ${GOWA_IMAGE:-aldinokemal2104/go-whatsapp-web-multidevice}
+    restart: unless-stopped
+    command:
+      - rest
+    environment:
+      - APP_PORT=${GOWA_PORT:-3000}
+      - APP_DEBUG=false
+      - WHATSAPP_WEBHOOK=http://openclaw-vibestack:${WA_BRIDGE_PORT:-8765}/webhook
+      - WHATSAPP_WEBHOOK_EVENTS=message
+      - WHATSAPP_WEBHOOK_SECRET=
+      - APP_BASIC_AUTH=${GOWA_BASIC_AUTH:-}
+      - HTTP_PROXY=${GOWA_HTTP_PROXY:-}
+      - HTTPS_PROXY=${GOWA_HTTPS_PROXY:-}
+    volumes:
+      - ${GOWA_DATA_DIR:-/root/.gowa}:/app/storages
+    ports:
+      - "127.0.0.1:${GOWA_PORT:-3000}:3000"

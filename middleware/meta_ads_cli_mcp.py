@@ -1,0 +1,1310 @@
+#!/usr/bin/env python3
+"""MCP server stdio que expõe a Meta Ads CLI oficial (`meta`) como tools tipados.
+
+Cobertura: 11 grupos da CLI (adaccount, campaign, adset, ad, creative,
+catalog, page, dataset, insights, product-set, product-item, product-feed),
+mais conveniências de pause/resume/archive.
+
+Auth: a CLI lê ACCESS_TOKEN e AD_ACCOUNT_ID do env. Subprocessos herdam
+do env do container openclaw-gateway.
+
+Deletes sempre passam --force (MCP não tem prompt interativo).
+
+Formato de saída: cada tool aceita `output_format` (default 'json'). Quando o
+JSON da CLI vem quebrado/incompatível, passe 'table', 'csv', 'yaml', 'text'
+(o que a CLI suportar) e o wrapper devolve a string crua sem tentar parsear.
+Use 'none' para omitir a flag e deixar o default da CLI.
+
+Pacote oficial: https://pypi.org/project/meta-ads/  (v1.0.1, Meta).
+"""
+import hashlib
+import json
+import os
+import subprocess
+import urllib.error
+import urllib.parse
+import urllib.request
+from typing import Any
+
+from mcp.server.fastmcp import FastMCP
+
+mcp = FastMCP("meta-ads-cli")
+CLI = "meta"
+
+
+def _run(*args: str, output_format: str = "json") -> Any:
+    """Executa `meta [--output <fmt>] ads <args>`. Formato de saída configurável.
+
+    --output é flag GLOBAL do meta (vem antes de 'ads'), não do subcomando.
+    Formatos suportados pela CLI: table | json | plain.
+
+    output_format:
+      - 'json' (default): adiciona --output json e parseia o stdout.
+        Em falha de parse, devolve dict com 'raw', 'parse_error' e 'hint'.
+      - 'table' | 'plain': passa direto pra CLI e devolve o stdout cru
+        (string), sem parsing. Use quando o JSON estiver quebrado.
+      - 'none' ou '': omite --output (default da CLI = table).
+    """
+    # --no-color: evita ANSI sujando o JSON quando stdout nao eh TTY (subprocess).
+    # --no-input: desabilita prompts interativos (MCP nao tem como responder).
+    cmd = [CLI, "--no-color", "--no-input"]
+    if output_format and output_format != "none":
+        cmd += ["--output", output_format]
+    cmd += ["ads", *args]
+    r = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if r.returncode != 0:
+        return {
+            "error": r.stderr.strip() or f"exit {r.returncode}",
+            "stdout": r.stdout,
+            "cmd": " ".join(cmd),
+        }
+    if output_format == "json":
+        stdout = r.stdout.strip()
+        # Bug da CLI: em listas vazias devolve "No results." em vez de "[]",
+        # mesmo com --output json. Normalizamos pra lista vazia.
+        if stdout.rstrip(".").lower() == "no results":
+            return []
+        try:
+            return json.loads(stdout)
+        except json.JSONDecodeError as e:
+            return {
+                "raw": r.stdout,
+                "parse_error": f"JSON inválido: {e.msg} (linha {e.lineno}, col {e.colno})",
+                "hint": "Tente output_format='table' ou 'text' pra pular o parsing.",
+            }
+    return r.stdout
+
+
+def _flags(**kwargs: Any) -> list[str]:
+    """Converte kwargs em lista de flags `--key value`, omitindo None.
+
+    - Booleans True -> flag presente sem valor; False/None -> omite.
+    - Listas -> flag repetida pra cada item.
+    - Substitui underscore por hífen no nome da flag.
+    """
+    out: list[str] = []
+    for k, v in kwargs.items():
+        if v is None:
+            continue
+        flag = "--" + k.replace("_", "-")
+        if isinstance(v, bool):
+            if v:
+                out.append(flag)
+        elif isinstance(v, list):
+            for item in v:
+                out.extend([flag, str(item)])
+        else:
+            out.extend([flag, str(v)])
+    return out
+
+
+# ============================================================
+# Ad Accounts
+# ============================================================
+
+@mcp.tool()
+def list_ad_accounts(output_format: str = "json") -> Any:
+    """Lista todas as ad accounts acessíveis pelo ACCESS_TOKEN."""
+    return _run("adaccount", "list", output_format=output_format)
+
+
+@mcp.tool()
+def get_ad_account(ad_account_id: str, output_format: str = "json") -> Any:
+    """Detalhes de uma ad account. Formato: 'act_123456789'."""
+    return _run("adaccount", "get", ad_account_id, output_format=output_format)
+
+
+@mcp.tool()
+def current_ad_account(output_format: str = "json") -> Any:
+    """Ad account ativa (lida do env AD_ACCOUNT_ID).
+
+    Lê direto do env em vez de chamar `meta ads adaccount current`, porque a
+    CLI ignora --output json nesse subcomando e devolve sempre texto plano
+    ("Ad Account ID: act_..."), o que quebra o parsing.
+    """
+    ad_account_id = os.environ.get("AD_ACCOUNT_ID", "")
+    if output_format == "json":
+        return {"ad_account_id": ad_account_id} if ad_account_id else {"ad_account_id": None, "warning": "AD_ACCOUNT_ID nao definido no env"}
+    return f"Ad Account ID: {ad_account_id}" if ad_account_id else "Ad Account ID: (nao definido)"
+
+
+# ============================================================
+# Campaigns
+# ============================================================
+
+@mcp.tool()
+def list_campaigns(output_format: str = "json") -> Any:
+    """Lista campanhas da ad account ativa."""
+    return _run("campaign", "list", output_format=output_format)
+
+
+@mcp.tool()
+def get_campaign(campaign_id: str, output_format: str = "json") -> Any:
+    """Detalhes de uma campanha."""
+    return _run("campaign", "get", campaign_id, output_format=output_format)
+
+
+@mcp.tool()
+def create_campaign(
+    name: str,
+    objective: str,
+    daily_budget_cents: int | None = None,
+    lifetime_budget_cents: int | None = None,
+    status: str = "paused",
+    adset_budget_sharing: bool = False,
+    output_format: str = "json",
+) -> Any:
+    """Cria uma campanha. Default: PAUSED (para não gastar acidentalmente).
+
+    objective: outcome_sales | outcome_traffic | outcome_leads |
+               outcome_awareness | outcome_engagement | outcome_app_promotion.
+    budgets em centavos. Use lifetime_budget OU daily_budget, não os dois.
+    Para CBO (Campaign Budget Optimization), defina budget aqui e omita no ad set.
+    """
+    return _run(
+        "campaign", "create",
+        *_flags(
+            name=name,
+            objective=objective,
+            daily_budget=daily_budget_cents,
+            lifetime_budget=lifetime_budget_cents,
+            status=status,
+            adset_budget_sharing=adset_budget_sharing,
+        ),
+        output_format=output_format,
+    )
+
+
+@mcp.tool()
+def update_campaign(
+    campaign_id: str,
+    name: str | None = None,
+    status: str | None = None,
+    daily_budget_cents: int | None = None,
+    lifetime_budget_cents: int | None = None,
+    output_format: str = "json",
+) -> Any:
+    """Atualiza campanha. status: active | paused | archived."""
+    return _run(
+        "campaign", "update", campaign_id,
+        *_flags(
+            name=name,
+            status=status,
+            daily_budget=daily_budget_cents,
+            lifetime_budget=lifetime_budget_cents,
+        ),
+        output_format=output_format,
+    )
+
+
+@mcp.tool()
+def pause_campaign(campaign_id: str, output_format: str = "json") -> Any:
+    """Pausa campanha (status -> paused). Atalho pra update_campaign."""
+    return _run("campaign", "update", campaign_id, "--status", "paused", output_format=output_format)
+
+
+@mcp.tool()
+def resume_campaign(campaign_id: str, output_format: str = "json") -> Any:
+    """Reativa campanha (status -> active). Atalho pra update_campaign."""
+    return _run("campaign", "update", campaign_id, "--status", "active", output_format=output_format)
+
+
+@mcp.tool()
+def archive_campaign(campaign_id: str, output_format: str = "json") -> Any:
+    """Arquiva campanha (status -> archived)."""
+    return _run("campaign", "update", campaign_id, "--status", "archived", output_format=output_format)
+
+
+@mcp.tool()
+def delete_campaign(campaign_id: str, output_format: str = "json") -> Any:
+    """Deleta campanha (e todos ad sets/ads filhos). DESTRUTIVO. Sempre --force."""
+    return _run("campaign", "delete", campaign_id, "--force", output_format=output_format)
+
+
+# ============================================================
+# Ad Sets
+# ============================================================
+
+@mcp.tool()
+def list_ad_sets(campaign_id: str | None = None, output_format: str = "json") -> Any:
+    """Lista ad sets. Se campaign_id informado, filtra por campanha."""
+    args = ["adset", "list"]
+    if campaign_id:
+        args.append(campaign_id)
+    return _run(*args, output_format=output_format)
+
+
+@mcp.tool()
+def get_ad_set(ad_set_id: str, output_format: str = "json") -> Any:
+    """Detalhes de um ad set."""
+    return _run("adset", "get", ad_set_id, output_format=output_format)
+
+
+@mcp.tool()
+def create_ad_set(
+    campaign_id: str,
+    name: str,
+    optimization_goal: str,
+    billing_event: str,
+    daily_budget_cents: int | None = None,
+    lifetime_budget_cents: int | None = None,
+    bid_amount_cents: int | None = None,
+    start_time: str | None = None,
+    end_time: str | None = None,
+    status: str = "paused",
+    targeting_countries: list[str] | None = None,
+    pixel_id: str | None = None,
+    custom_event_type: str | None = None,
+    output_format: str = "json",
+) -> Any:
+    """Cria ad set numa campanha. Default: PAUSED.
+
+    optimization_goal: link_clicks | impressions | reach | offsite_conversions |
+                       landing_page_views | thruplay | value | post_engagement |
+                       page_likes | lead_generation | app_installs | event_responses |
+                       conversations.
+    billing_event: impressions | link_clicks | clicks | thruplay | app_installs |
+                   page_likes | post_engagement.
+    targeting_countries: lista de códigos ISO ['US', 'BR', 'CA']. Convertido pra CSV.
+    Para conversão (campaign OUTCOME_SALES): defina pixel_id + custom_event_type
+    (ex: 'purchase'). Omita budgets se a campanha usa CBO.
+    lifetime_budget exige end_time.
+    """
+    countries = ",".join(targeting_countries) if targeting_countries else None
+    return _run(
+        "adset", "create", campaign_id,
+        *_flags(
+            name=name,
+            optimization_goal=optimization_goal,
+            billing_event=billing_event,
+            daily_budget=daily_budget_cents,
+            lifetime_budget=lifetime_budget_cents,
+            bid_amount=bid_amount_cents,
+            start_time=start_time,
+            end_time=end_time,
+            status=status,
+            targeting_countries=countries,
+            pixel_id=pixel_id,
+            custom_event_type=custom_event_type,
+        ),
+        output_format=output_format,
+    )
+
+
+@mcp.tool()
+def update_ad_set(
+    ad_set_id: str,
+    name: str | None = None,
+    status: str | None = None,
+    daily_budget_cents: int | None = None,
+    lifetime_budget_cents: int | None = None,
+    bid_amount_cents: int | None = None,
+    end_time: str | None = None,
+    output_format: str = "json",
+) -> Any:
+    """Atualiza ad set. status: active | paused | archived."""
+    return _run(
+        "adset", "update", ad_set_id,
+        *_flags(
+            name=name,
+            status=status,
+            daily_budget=daily_budget_cents,
+            lifetime_budget=lifetime_budget_cents,
+            bid_amount=bid_amount_cents,
+            end_time=end_time,
+        ),
+        output_format=output_format,
+    )
+
+
+@mcp.tool()
+def pause_ad_set(ad_set_id: str, output_format: str = "json") -> Any:
+    """Pausa ad set."""
+    return _run("adset", "update", ad_set_id, "--status", "paused", output_format=output_format)
+
+
+@mcp.tool()
+def resume_ad_set(ad_set_id: str, output_format: str = "json") -> Any:
+    """Reativa ad set."""
+    return _run("adset", "update", ad_set_id, "--status", "active", output_format=output_format)
+
+
+@mcp.tool()
+def delete_ad_set(ad_set_id: str, output_format: str = "json") -> Any:
+    """Deleta ad set (e ads filhos). DESTRUTIVO. Sempre --force."""
+    return _run("adset", "delete", ad_set_id, "--force", output_format=output_format)
+
+
+# ============================================================
+# Ads
+# ============================================================
+
+@mcp.tool()
+def list_ads(ad_set_id: str | None = None, output_format: str = "json") -> Any:
+    """Lista ads. Se ad_set_id informado, filtra por ad set."""
+    args = ["ad", "list"]
+    if ad_set_id:
+        args.append(ad_set_id)
+    return _run(*args, output_format=output_format)
+
+
+@mcp.tool()
+def get_ad(ad_id: str, output_format: str = "json") -> Any:
+    """Detalhes de um ad."""
+    return _run("ad", "get", ad_id, output_format=output_format)
+
+
+@mcp.tool()
+def create_ad(
+    ad_set_id: str,
+    name: str,
+    creative_id: str,
+    status: str = "paused",
+    pixel_id: str | None = None,
+    tracking_specs: str | None = None,
+    output_format: str = "json",
+) -> Any:
+    """Cria ad num ad set, referenciando um creative existente. Default: PAUSED.
+
+    Antes de chamar: crie o creative com create_creative e use o ID retornado.
+    Para conversão, use pixel_id (auto-gera tracking specs). tracking_specs aceita
+    JSON cru pra config customizada (não use junto com pixel_id).
+    """
+    return _run(
+        "ad", "create", ad_set_id,
+        *_flags(
+            name=name,
+            creative_id=creative_id,
+            status=status,
+            pixel_id=pixel_id,
+            tracking_specs=tracking_specs,
+        ),
+        output_format=output_format,
+    )
+
+
+@mcp.tool()
+def update_ad(
+    ad_id: str,
+    name: str | None = None,
+    creative_id: str | None = None,
+    status: str | None = None,
+    output_format: str = "json",
+) -> Any:
+    """Atualiza ad. status: active | paused | archived."""
+    return _run(
+        "ad", "update", ad_id,
+        *_flags(name=name, creative_id=creative_id, status=status),
+        output_format=output_format,
+    )
+
+
+@mcp.tool()
+def pause_ad(ad_id: str, output_format: str = "json") -> Any:
+    """Pausa ad."""
+    return _run("ad", "update", ad_id, "--status", "paused", output_format=output_format)
+
+
+@mcp.tool()
+def resume_ad(ad_id: str, output_format: str = "json") -> Any:
+    """Reativa ad."""
+    return _run("ad", "update", ad_id, "--status", "active", output_format=output_format)
+
+
+@mcp.tool()
+def delete_ad(ad_id: str, output_format: str = "json") -> Any:
+    """Deleta ad. DESTRUTIVO. Sempre --force."""
+    return _run("ad", "delete", ad_id, "--force", output_format=output_format)
+
+
+# ============================================================
+# Creatives
+# ============================================================
+
+@mcp.tool()
+def list_creatives(output_format: str = "json") -> Any:
+    """Lista creatives da ad account ativa."""
+    return _run("creative", "list", output_format=output_format)
+
+
+@mcp.tool()
+def get_creative(creative_id: str, output_format: str = "json") -> Any:
+    """Detalhes de um creative."""
+    return _run("creative", "get", creative_id, output_format=output_format)
+
+
+@mcp.tool()
+def create_creative(
+    name: str,
+    page_id: str,
+    image_path: str | None = None,
+    video_path: str | None = None,
+    body: str | None = None,
+    title: str | None = None,
+    link_url: str | None = None,
+    description: str | None = None,
+    call_to_action: str | None = None,
+    instagram_actor_id: str | None = None,
+    output_format: str = "json",
+) -> Any:
+    """Cria creative (modo standard — single image OU video).
+
+    page_id é obrigatório (identidade do anúncio).
+    Use image_path OU video_path (path dentro do container).
+    call_to_action: shop_now | learn_more | sign_up | book_travel | buy_now |
+                    contact_us | download | get_offer | get_quote | apply_now |
+                    no_button | open_link | subscribe | watch_more.
+    Para DCO (múltiplas variantes), use create_creative_dco.
+    """
+    return _run(
+        "creative", "create",
+        *_flags(
+            name=name,
+            page_id=page_id,
+            image=image_path,
+            video=video_path,
+            body=body,
+            title=title,
+            link_url=link_url,
+            description=description,
+            call_to_action=call_to_action,
+            instagram_actor_id=instagram_actor_id,
+        ),
+        output_format=output_format,
+    )
+
+
+@mcp.tool()
+def create_creative_dco(
+    name: str,
+    page_id: str,
+    link_url: str,
+    image_paths: list[str] | None = None,
+    video_paths: list[str] | None = None,
+    titles: list[str] | None = None,
+    bodies: list[str] | None = None,
+    descriptions: list[str] | None = None,
+    call_to_actions: list[str] | None = None,
+    instagram_actor_id: str | None = None,
+    output_format: str = "json",
+) -> Any:
+    """Cria creative DCO (Dynamic Creative Optimization).
+
+    Meta testa combinações automaticamente. Limites:
+    10 images/videos, 5 titles, 5 bodies, 5 descriptions, 5 call_to_actions.
+    """
+    return _run(
+        "creative", "create",
+        *_flags(
+            name=name,
+            page_id=page_id,
+            link_url=link_url,
+            images=image_paths,
+            videos=video_paths,
+            titles=titles,
+            bodies=bodies,
+            descriptions=descriptions,
+            call_to_actions=call_to_actions,
+            instagram_actor_id=instagram_actor_id,
+        ),
+        output_format=output_format,
+    )
+
+
+@mcp.tool()
+def update_creative(
+    creative_id: str,
+    name: str | None = None,
+    image_path: str | None = None,
+    video_path: str | None = None,
+    body: str | None = None,
+    title: str | None = None,
+    link_url: str | None = None,
+    description: str | None = None,
+    call_to_action: str | None = None,
+    instagram_actor_id: str | None = None,
+    status: str | None = None,
+    output_format: str = "json",
+) -> Any:
+    """Atualiza creative. Apenas campos informados são alterados.
+
+    Meta restringe alguns campos pós-criação — pode ser necessário
+    criar novo creative em vez de editar.
+    """
+    return _run(
+        "creative", "update", creative_id,
+        *_flags(
+            name=name,
+            image=image_path,
+            video=video_path,
+            body=body,
+            title=title,
+            link_url=link_url,
+            description=description,
+            call_to_action=call_to_action,
+            instagram_actor_id=instagram_actor_id,
+            status=status,
+        ),
+        output_format=output_format,
+    )
+
+
+@mcp.tool()
+def delete_creative(creative_id: str, output_format: str = "json") -> Any:
+    """Deleta creative. Bloqueia se está em uso por ads ativos. Sempre --force."""
+    return _run("creative", "delete", creative_id, "--force", output_format=output_format)
+
+
+# ============================================================
+# Insights (métricas de performance)
+# ============================================================
+
+@mcp.tool()
+def get_insights(
+    date_preset: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    time_increment: str = "all_days",
+    breakdown: list[str] | None = None,
+    fields: list[str] | None = None,
+    campaign_id: str | None = None,
+    adset_id: str | None = None,
+    ad_id: str | None = None,
+    sort: str | None = None,
+    limit: int = 50,
+    output_format: str = "json",
+) -> Any:
+    """Query de performance: impressões, cliques, gasto, CPC, CPM, etc.
+
+    date_preset: today | yesterday | last_3d | last_7d | last_14d | last_30d (default) |
+                 last_90d | this_month | last_month. Sobrescreve since/until.
+    since/until: YYYY-MM-DD. Sobrescrevem date_preset.
+    time_increment: daily | weekly | monthly | all_days (default).
+    breakdown: age | gender | country | publisher_platform | device_platform |
+               platform_position | impression_device. Pode repetir.
+    fields: lista de métricas. Default: spend,impressions,clicks,ctr,cpc,reach.
+    Filtros: campaign_id, adset_id, ad_id (escolha um nível).
+    sort: ex 'spend_descending'.
+    """
+    args = ["insights", "get"]
+    args += _flags(
+        date_preset=date_preset,
+        since=since,
+        until=until,
+        time_increment=time_increment,
+        campaign_id=campaign_id,
+        adset_id=adset_id,
+        ad_id=ad_id,
+        sort=sort,
+        limit=limit,
+    )
+    for b in (breakdown or []):
+        args += ["--breakdown", b]
+    if fields:
+        args += ["--fields", ",".join(fields)]
+    return _run(*args, output_format=output_format)
+
+
+# ============================================================
+# Catalogs
+# ============================================================
+
+@mcp.tool()
+def list_catalogs(output_format: str = "json") -> Any:
+    """Lista product catalogs do business."""
+    return _run("catalog", "list", output_format=output_format)
+
+
+@mcp.tool()
+def get_catalog(catalog_id: str, output_format: str = "json") -> Any:
+    """Detalhes de um catálogo."""
+    return _run("catalog", "get", catalog_id, output_format=output_format)
+
+
+@mcp.tool()
+def create_catalog(name: str, vertical: str = "commerce", output_format: str = "json") -> Any:
+    """Cria catálogo. vertical: commerce (default) | hotels | flights | destinations |
+    home_listings | vehicles | adoptable_pets | offer_items | offline_commerce |
+    transactable_items | generic | local_service_businesses."""
+    return _run("catalog", "create", *_flags(name=name, vertical=vertical), output_format=output_format)
+
+
+@mcp.tool()
+def update_catalog(catalog_id: str, name: str | None = None, output_format: str = "json") -> Any:
+    """Atualiza catálogo."""
+    return _run("catalog", "update", catalog_id, *_flags(name=name), output_format=output_format)
+
+
+@mcp.tool()
+def delete_catalog(catalog_id: str, output_format: str = "json") -> Any:
+    """Deleta catálogo. Bloqueia se houver feeds/ads ativos. Sempre --force."""
+    return _run("catalog", "delete", catalog_id, "--force", output_format=output_format)
+
+
+# ============================================================
+# Pages
+# ============================================================
+
+@mcp.tool()
+def list_pages(output_format: str = "json") -> Any:
+    """Lista business pages acessíveis."""
+    return _run("page", "list", output_format=output_format)
+
+
+@mcp.tool()
+def get_page(page_id: str, output_format: str = "json") -> Any:
+    """Detalhes de uma Facebook Page."""
+    return _run("page", "get", page_id, output_format=output_format)
+
+
+# ============================================================
+# Datasets (Pixels)
+# ============================================================
+
+@mcp.tool()
+def list_datasets(output_format: str = "json") -> Any:
+    """Lista datasets (ads pixels) do business."""
+    return _run("dataset", "list", output_format=output_format)
+
+
+@mcp.tool()
+def get_dataset(pixel_id: str, output_format: str = "json") -> Any:
+    """Detalhes de um dataset (pixel)."""
+    return _run("dataset", "get", pixel_id, output_format=output_format)
+
+
+@mcp.tool()
+def create_dataset(name: str, output_format: str = "json") -> Any:
+    """Cria dataset (pixel) no business. Usuário autenticado fica com
+    ADVERTISE/ANALYZE/EDIT automaticamente."""
+    return _run("dataset", "create", *_flags(name=name), output_format=output_format)
+
+
+@mcp.tool()
+def connect_dataset(
+    pixel_id: str,
+    ad_account_id: str | None = None,
+    catalog_id: str | None = None,
+    output_format: str = "json",
+) -> Any:
+    """Conecta dataset a uma ad account e/ou catálogo (informe pelo menos um)."""
+    return _run(
+        "dataset", "connect", pixel_id,
+        *_flags(ad_account_id=ad_account_id, catalog_id=catalog_id),
+        output_format=output_format,
+    )
+
+
+@mcp.tool()
+def disconnect_dataset(pixel_id: str, ad_account_id: str, output_format: str = "json") -> Any:
+    """Desconecta dataset de uma ad account."""
+    return _run(
+        "dataset", "disconnect", pixel_id,
+        *_flags(ad_account_id=ad_account_id),
+        output_format=output_format,
+    )
+
+
+@mcp.tool()
+def assign_user_to_dataset(
+    pixel_id: str,
+    user_id: str | None = None,
+    tasks: list[str] | None = None,
+    output_format: str = "json",
+) -> Any:
+    """Atribui usuário ao dataset. user_id default = usuário autenticado.
+    tasks: advertise | analyze | edit | upload. Default: [advertise, analyze]."""
+    return _run(
+        "dataset", "assign-user", pixel_id,
+        *_flags(user_id=user_id, tasks=tasks),
+        output_format=output_format,
+    )
+
+
+# ============================================================
+# Product Sets
+# ============================================================
+
+@mcp.tool()
+def list_product_sets(catalog_id: str, output_format: str = "json") -> Any:
+    """Lista product sets de um catálogo."""
+    return _run("product-set", "list", *_flags(catalog_id=catalog_id), output_format=output_format)
+
+
+@mcp.tool()
+def get_product_set(product_set_id: str, output_format: str = "json") -> Any:
+    """Detalhes de um product set."""
+    return _run("product-set", "get", product_set_id, output_format=output_format)
+
+
+@mcp.tool()
+def create_product_set(
+    catalog_id: str,
+    name: str,
+    filter_json: str | None = None,
+    retailer_id: str | None = None,
+    output_format: str = "json",
+) -> Any:
+    """Cria product set dentro de um catálogo.
+
+    filter_json: expressão JSON (ex: '{"availability":{"eq":"in stock"}}').
+    """
+    return _run(
+        "product-set", "create",
+        *_flags(catalog_id=catalog_id, name=name, filter=filter_json, retailer_id=retailer_id),
+        output_format=output_format,
+    )
+
+
+@mcp.tool()
+def update_product_set(
+    product_set_id: str,
+    name: str | None = None,
+    filter_json: str | None = None,
+    retailer_id: str | None = None,
+    output_format: str = "json",
+) -> Any:
+    """Atualiza product set."""
+    return _run(
+        "product-set", "update", product_set_id,
+        *_flags(name=name, filter=filter_json, retailer_id=retailer_id),
+        output_format=output_format,
+    )
+
+
+@mcp.tool()
+def delete_product_set(product_set_id: str, output_format: str = "json") -> Any:
+    """Deleta product set. Sempre --force."""
+    return _run("product-set", "delete", product_set_id, "--force", output_format=output_format)
+
+
+# ============================================================
+# Product Items
+# ============================================================
+
+@mcp.tool()
+def list_product_items(catalog_id: str, output_format: str = "json") -> Any:
+    """Lista product items de um catálogo."""
+    return _run("product-item", "list", *_flags(catalog_id=catalog_id), output_format=output_format)
+
+
+@mcp.tool()
+def get_product_item(product_item_id: str, output_format: str = "json") -> Any:
+    """Detalhes de um product item."""
+    return _run("product-item", "get", product_item_id, output_format=output_format)
+
+
+@mcp.tool()
+def create_product_item(
+    catalog_id: str,
+    retailer_id: str,
+    name: str,
+    url: str,
+    image_url: str,
+    price_cents: int,
+    currency: str,
+    description: str | None = None,
+    brand: str | None = None,
+    category: str | None = None,
+    availability: str = "in stock",
+    condition: str = "new",
+    output_format: str = "json",
+) -> Any:
+    """Cria product item num catálogo.
+
+    price_cents: em centavos (999 = $9.99).
+    currency: ISO 4217 ('USD', 'BRL', etc.).
+    availability: in stock | out of stock | preorder | available for order |
+                  discontinued | pending | mark_as_sold.
+    condition: new | refurbished | used | used_like_new | used_good | used_fair |
+               cpo | open_box_new.
+    """
+    return _run(
+        "product-item", "create",
+        *_flags(
+            catalog_id=catalog_id,
+            retailer_id=retailer_id,
+            name=name,
+            url=url,
+            image_url=image_url,
+            price=price_cents,
+            currency=currency,
+            description=description,
+            brand=brand,
+            category=category,
+            availability=availability,
+            condition=condition,
+        ),
+        output_format=output_format,
+    )
+
+
+@mcp.tool()
+def update_product_item(
+    product_item_id: str,
+    name: str | None = None,
+    description: str | None = None,
+    url: str | None = None,
+    image_url: str | None = None,
+    brand: str | None = None,
+    category: str | None = None,
+    availability: str | None = None,
+    condition: str | None = None,
+    price_cents: int | None = None,
+    currency: str | None = None,
+    output_format: str = "json",
+) -> Any:
+    """Atualiza product item."""
+    return _run(
+        "product-item", "update", product_item_id,
+        *_flags(
+            name=name,
+            description=description,
+            url=url,
+            image_url=image_url,
+            brand=brand,
+            category=category,
+            availability=availability,
+            condition=condition,
+            price=price_cents,
+            currency=currency,
+        ),
+        output_format=output_format,
+    )
+
+
+@mcp.tool()
+def delete_product_item(product_item_id: str, output_format: str = "json") -> Any:
+    """Deleta product item. Sempre --force."""
+    return _run("product-item", "delete", product_item_id, "--force", output_format=output_format)
+
+
+# ============================================================
+# Product Feeds
+# ============================================================
+
+@mcp.tool()
+def list_product_feeds(catalog_id: str, output_format: str = "json") -> Any:
+    """Lista product feeds de um catálogo."""
+    return _run("product-feed", "list", *_flags(catalog_id=catalog_id), output_format=output_format)
+
+
+@mcp.tool()
+def get_product_feed(product_feed_id: str, output_format: str = "json") -> Any:
+    """Detalhes de um product feed."""
+    return _run("product-feed", "get", product_feed_id, output_format=output_format)
+
+
+@mcp.tool()
+def create_product_feed(
+    catalog_id: str,
+    name: str,
+    feed_type: str = "products",
+    default_currency: str | None = None,
+    country: str | None = None,
+    encoding: str | None = None,
+    file_name: str | None = None,
+    output_format: str = "json",
+) -> Any:
+    """Cria product feed num catálogo.
+
+    feed_type: products (default) | automotive_model | destination | flight |
+               home_listing | hotel | hotel_room | local_inventory | media_title |
+               offer | transactable_items | vehicles | vehicle_offer.
+    encoding: autodetect | utf8 | latin1 | utf16be | utf16le | utf32be | utf32le.
+    """
+    return _run(
+        "product-feed", "create",
+        *_flags(
+            catalog_id=catalog_id,
+            name=name,
+            feed_type=feed_type,
+            default_currency=default_currency,
+            country=country,
+            encoding=encoding,
+            file_name=file_name,
+        ),
+        output_format=output_format,
+    )
+
+
+@mcp.tool()
+def update_product_feed(
+    product_feed_id: str,
+    name: str | None = None,
+    default_currency: str | None = None,
+    country: str | None = None,
+    encoding: str | None = None,
+    file_name: str | None = None,
+    output_format: str = "json",
+) -> Any:
+    """Atualiza product feed."""
+    return _run(
+        "product-feed", "update", product_feed_id,
+        *_flags(
+            name=name,
+            default_currency=default_currency,
+            country=country,
+            encoding=encoding,
+            file_name=file_name,
+        ),
+        output_format=output_format,
+    )
+
+
+@mcp.tool()
+def delete_product_feed(product_feed_id: str, output_format: str = "json") -> Any:
+    """Deleta product feed. Sempre --force."""
+    return _run("product-feed", "delete", product_feed_id, "--force", output_format=output_format)
+
+
+# ============================================================
+# Custom Audiences (Graph API direta — CLI nao suporta)
+# ============================================================
+# A `meta` CLI v1.0.1 nao tem subcomando audience. Pra cobrir Custom Audiences
+# e Lookalike Audiences, batemos direto na Graph API com o mesmo ACCESS_TOKEN.
+# Hash de PII (email/phone) eh feito localmente em SHA256 (lowercase trim),
+# conforme exigido pelo endpoint /<audience>/users do Meta.
+
+GRAPH_API_VERSION = "v22.0"
+GRAPH_BASE = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
+
+
+def _graph(method: str, path: str, params: dict | None = None, body: dict | None = None) -> Any:
+    """Chama a Graph API com o ACCESS_TOKEN do env. Retorna dict parseado ou {"error", ...}."""
+    token = os.environ.get("ACCESS_TOKEN", "")
+    if not token:
+        return {"error": "ACCESS_TOKEN nao configurado no env"}
+
+    query = dict(params or {})
+    query["access_token"] = token
+    url = f"{GRAPH_BASE}{path}?{urllib.parse.urlencode(query)}"
+
+    data = None
+    headers: dict[str, str] = {}
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode("utf-8")
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        try:
+            err_body = json.loads(e.read().decode("utf-8"))
+        except Exception:
+            err_body = {"raw": str(e)}
+        return {"error": err_body, "status": e.code, "method": method, "path": path}
+    except Exception as e:
+        return {"error": str(e), "method": method, "path": path}
+
+
+def _resolve_ad_account(ad_account_id: str | None) -> str | None:
+    """Devolve ad_account_id com prefixo 'act_' garantido. None se nao definido."""
+    aid = ad_account_id or os.environ.get("AD_ACCOUNT_ID", "")
+    if not aid:
+        return None
+    return aid if aid.startswith("act_") else f"act_{aid}"
+
+
+def _hash_value(v: str) -> str:
+    return hashlib.sha256(v.strip().lower().encode("utf-8")).hexdigest()
+
+
+def _build_users_payload(
+    emails: list[str] | None,
+    phones: list[str] | None,
+    already_hashed: bool,
+) -> Any:
+    """Monta {"payload": {"schema", "data"}} pro endpoint /<audience>/users.
+
+    Hash:
+    - email: lowercase + trim + SHA256.
+    - phone: remove caracteres nao-numericos + SHA256 (Meta espera so digitos).
+    Use already_hashed=True quando a lista ja vier pronta.
+    Retorna string com erro se inputs invalidos.
+    """
+    if not emails and not phones:
+        return "Forneca pelo menos emails ou phones"
+
+    schema: list[str] = []
+    if emails:
+        schema.append("EMAIL_SHA256")
+    if phones:
+        schema.append("PHONE_SHA256")
+
+    def _email(v: str) -> str:
+        return v.strip().lower() if already_hashed else _hash_value(v)
+
+    def _phone(v: str) -> str:
+        if already_hashed:
+            return v.strip().lower()
+        digits = "".join(c for c in v if c.isdigit())
+        return hashlib.sha256(digits.encode("utf-8")).hexdigest()
+
+    n = max(len(emails or []), len(phones or []))
+    rows: list[list[str]] = []
+    for i in range(n):
+        row: list[str] = []
+        if emails:
+            row.append(_email(emails[i]) if i < len(emails) else "")
+        if phones:
+            row.append(_phone(phones[i]) if i < len(phones) else "")
+        rows.append(row)
+
+    return {
+        "payload": {
+            "schema": schema[0] if len(schema) == 1 else schema,
+            "data": rows,
+        }
+    }
+
+
+@mcp.tool()
+def list_custom_audiences(limit: int = 50, ad_account_id: str | None = None) -> Any:
+    """Lista Custom Audiences da ad account (default: env AD_ACCOUNT_ID).
+
+    Retorna campos: id, name, subtype, description, approximate_count_lower/upper_bound,
+    delivery_status, operation_status, time_updated, retention_days.
+    """
+    aid = _resolve_ad_account(ad_account_id)
+    if not aid:
+        return {"error": "ad_account_id nao informado e AD_ACCOUNT_ID env vazio"}
+    return _graph("GET", f"/{aid}/customaudiences", params={
+        "fields": "id,name,subtype,description,approximate_count_lower_bound,approximate_count_upper_bound,delivery_status,operation_status,time_updated,retention_days",
+        "limit": limit,
+    })
+
+
+@mcp.tool()
+def get_custom_audience(audience_id: str) -> Any:
+    """Detalhes de um Custom Audience (inclui rule, lookalike_spec, time_created)."""
+    return _graph("GET", f"/{audience_id}", params={
+        "fields": "id,name,subtype,description,rule,customer_file_source,approximate_count_lower_bound,approximate_count_upper_bound,delivery_status,operation_status,time_created,time_updated,retention_days,lookalike_spec,opt_out_link",
+    })
+
+
+@mcp.tool()
+def create_custom_audience(
+    name: str,
+    subtype: str = "CUSTOM",
+    description: str | None = None,
+    customer_file_source: str = "USER_PROVIDED_ONLY",
+    retention_days: int = 180,
+    ad_account_id: str | None = None,
+) -> Any:
+    """Cria um Custom Audience.
+
+    subtype: CUSTOM (user list, default) | WEBSITE | APP | ENGAGEMENT |
+             OFFLINE_CONVERSION | VIDEO | DATA_SET. Pra LOOKALIKE use
+             create_lookalike_audience.
+    customer_file_source: USER_PROVIDED_ONLY (default — voce coletou os dados) |
+                          PARTNER_PROVIDED_ONLY | BOTH_USER_AND_PARTNER_PROVIDED.
+    retention_days: 1 a 540. Usuarios removidos automaticamente apos esse periodo.
+
+    Apos criar, popule com add_users_to_audience.
+    """
+    aid = _resolve_ad_account(ad_account_id)
+    if not aid:
+        return {"error": "ad_account_id nao informado e AD_ACCOUNT_ID env vazio"}
+    body: dict[str, Any] = {
+        "name": name,
+        "subtype": subtype,
+        "customer_file_source": customer_file_source,
+        "retention_days": retention_days,
+    }
+    if description:
+        body["description"] = description
+    return _graph("POST", f"/{aid}/customaudiences", body=body)
+
+
+@mcp.tool()
+def create_lookalike_audience(
+    name: str,
+    source_audience_id: str,
+    country: str,
+    ratio: float = 0.01,
+    description: str | None = None,
+    ad_account_id: str | None = None,
+) -> Any:
+    """Cria um Lookalike Audience a partir de um Custom Audience existente.
+
+    source_audience_id: ID do audience-base (>= 100 usuarios entregaveis).
+    country: ISO 2 letras ('BR', 'US', 'PT'...).
+    ratio: 0.01 a 0.20. 0.01 = 1% mais similar (preciso, audiencia pequena),
+           0.20 = 20% (amplo, menos preciso).
+    """
+    aid = _resolve_ad_account(ad_account_id)
+    if not aid:
+        return {"error": "ad_account_id nao informado e AD_ACCOUNT_ID env vazio"}
+    body: dict[str, Any] = {
+        "name": name,
+        "subtype": "LOOKALIKE",
+        "origin_audience_id": source_audience_id,
+        "lookalike_spec": json.dumps({
+            "type": "similarity",
+            "country": country,
+            "ratio": ratio,
+        }),
+    }
+    if description:
+        body["description"] = description
+    return _graph("POST", f"/{aid}/customaudiences", body=body)
+
+
+@mcp.tool()
+def add_users_to_audience(
+    audience_id: str,
+    emails: list[str] | None = None,
+    phones: list[str] | None = None,
+    already_hashed: bool = False,
+) -> Any:
+    """Adiciona usuarios a um Custom Audience (subtype=CUSTOM).
+
+    Hash automatico SHA256 (lowercase + trim pra email; so digitos pra phone)
+    a menos que already_hashed=True. Meta exige hash; nao envie PII em claro.
+
+    Batch maximo recomendado: 10000 por chamada. Pra listas maiores, chame
+    multiplas vezes.
+    """
+    payload = _build_users_payload(emails, phones, already_hashed)
+    if isinstance(payload, str):
+        return {"error": payload}
+    return _graph("POST", f"/{audience_id}/users", body=payload)
+
+
+@mcp.tool()
+def remove_users_from_audience(
+    audience_id: str,
+    emails: list[str] | None = None,
+    phones: list[str] | None = None,
+    already_hashed: bool = False,
+) -> Any:
+    """Remove usuarios de um Custom Audience. Mesma assinatura de add_users_to_audience."""
+    payload = _build_users_payload(emails, phones, already_hashed)
+    if isinstance(payload, str):
+        return {"error": payload}
+    return _graph("DELETE", f"/{audience_id}/users", body=payload)
+
+
+@mcp.tool()
+def delete_custom_audience(audience_id: str) -> Any:
+    """Deleta um Custom Audience. DESTRUTIVO. Ad sets que dependem dele param de entregar."""
+    return _graph("DELETE", f"/{audience_id}")
+
+
+# ============================================================
+# Duplicacao de entidades (Graph API direta — CLI nao suporta)
+# ============================================================
+# A `meta` CLI nao tem subcomando 'duplicate' em nenhuma entidade.
+# Graph API expoe POST /{id}/copies pra campaign, ad set e ad.
+# Default deep_copy=True (duplica filhos) e status_option=PAUSED (seguro).
+
+
+def _duplicate(
+    entity_id: str,
+    new_name: str | None,
+    rename_suffix: str | None,
+    status_option: str,
+    deep_copy: bool,
+    extra_params: dict[str, str] | None,
+    cli_subgroup: str,
+    id_key: str,
+) -> Any:
+    """Backbone das tools duplicate_*. POST /{id}/copies + rename opcional via CLI."""
+    params: dict[str, str] = {
+        "deep_copy": "true" if deep_copy else "false",
+        "status_option": status_option,
+    }
+    if rename_suffix:
+        params["rename_options"] = json.dumps({"rename_suffix": rename_suffix})
+    if extra_params:
+        params.update(extra_params)
+
+    result = _graph("POST", f"/{entity_id}/copies", params=params)
+    if isinstance(result, dict) and "error" in result:
+        return result
+
+    new_id = result.get(id_key) if isinstance(result, dict) else None
+    if new_name and new_id:
+        rename = _run(cli_subgroup, "update", str(new_id), "--name", new_name)
+        result["renamed_to"] = new_name
+        result["rename_result"] = rename
+    return result
+
+
+@mcp.tool()
+def duplicate_ad_set(
+    ad_set_id: str,
+    new_name: str | None = None,
+    rename_suffix: str | None = None,
+    status_option: str = "PAUSED",
+    deep_copy: bool = True,
+    campaign_id: str | None = None,
+) -> Any:
+    """Duplica um ad set via Graph API (a CLI nao tem 'duplicate').
+
+    deep_copy=True (default): duplica tambem os ads filhos do ad set.
+    status_option: PAUSED (default — seguro) | ACTIVE | INHERITED_FROM_SOURCE.
+    new_name: nome exato pro novo ad set. Se informado, duplica e renomeia
+              (extra round-trip via 'meta ads adset update --name').
+    rename_suffix: alternativa — Meta acrescenta esse sufixo ao nome original
+                   numa unica chamada (mais barato, menos controle).
+    campaign_id: move o novo ad set pra outra campanha. Default = mesma.
+
+    Pra variacao de targeting pos-duplicacao, chame update_ad_set no ID retornado.
+    Retorna {"copied_adset_id": "...", "ad_object_ids": [...]}.
+    """
+    extra = {"campaign_id": campaign_id} if campaign_id else None
+    return _duplicate(
+        ad_set_id, new_name, rename_suffix, status_option, deep_copy,
+        extra, "adset", "copied_adset_id",
+    )
+
+
+@mcp.tool()
+def duplicate_campaign(
+    campaign_id: str,
+    new_name: str | None = None,
+    rename_suffix: str | None = None,
+    status_option: str = "PAUSED",
+    deep_copy: bool = True,
+) -> Any:
+    """Duplica uma campanha inteira via Graph API.
+
+    deep_copy=True (default): duplica ad sets e ads recursivamente.
+    status_option: PAUSED (default) | ACTIVE | INHERITED_FROM_SOURCE.
+    Retorna {"copied_campaign_id": "...", "ad_object_ids": [...]}.
+    """
+    return _duplicate(
+        campaign_id, new_name, rename_suffix, status_option, deep_copy,
+        None, "campaign", "copied_campaign_id",
+    )
+
+
+@mcp.tool()
+def duplicate_ad(
+    ad_id: str,
+    new_name: str | None = None,
+    rename_suffix: str | None = None,
+    status_option: str = "PAUSED",
+    ad_set_id: str | None = None,
+) -> Any:
+    """Duplica um ad isolado via Graph API.
+
+    status_option: PAUSED (default) | ACTIVE | INHERITED_FROM_SOURCE.
+    ad_set_id: move o novo ad pra outro ad set. Default = mesmo.
+    Nao tem deep_copy (ad eh folha).
+    Retorna {"copied_ad_id": "...", ...}.
+    """
+    extra = {"adset_id": ad_set_id} if ad_set_id else None
+    return _duplicate(
+        ad_id, new_name, rename_suffix, status_option, False,
+        extra, "ad", "copied_ad_id",
+    )
+
+
+if __name__ == "__main__":
+    mcp.run()

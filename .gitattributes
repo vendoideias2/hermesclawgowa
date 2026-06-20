@@ -1,0 +1,6 @@
+# Normaliza fim de linha no checkout. Scripts shell PRECISAM ser LF: com CRLF
+# o shebang vira "#!/bin/sh\r" e o container falha com "entrypoint not found".
+* text=auto
+*.sh text eol=lf
+entrypoint.sh text eol=lf
+install.sh text eol=lf

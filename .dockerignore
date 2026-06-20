@@ -1,0 +1,17 @@
+# Mantem o build context leve e evita vazar segredos pro daemon.
+# O Dockerfile so' precisa de middleware/ e entrypoint.sh — o resto fica fora.
+.git
+.gitignore
+.gitattributes
+.env
+.env.*
+!.env.example
+*.bak
+*.bak*
+node_modules
+agency/
+openclaw.json
+openclaw.json.bak*
+.DS_Store
+README.md
+install.sh

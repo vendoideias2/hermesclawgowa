@@ -1,0 +1,20 @@
+.env
+*.local
+.DS_Store
+node_modules/
+*.zip
+
+# openclaw.json da raiz e' a config real (copiada da VPS, contem secrets).
+# O template versionado fica em config/openclaw.json.
+/openclaw.json
+/openclaw.json.bak*
+
+# agency/ = templates de prompt dos agentes (IDENTITY/SOUL/USER/TOOLS/AGENTS).
+# SÃO versionados (alunos baixam, trocam os {{placeholders}} e carregam no OpenClaw).
+# Só ignoramos artefatos de RUNTIME que o OpenClaw porventura escreva aqui:
+/agency/**/sessions/
+/agency/**/sandbox/
+/agency/**/.runtime/
+
+# guia do curso Hermes — nao versionar
+/docs/curso-hermes.md

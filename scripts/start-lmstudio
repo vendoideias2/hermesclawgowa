@@ -1,0 +1,44 @@
+#!/bin/sh
+# Sobe o LM Studio headless: daemon 'llmster' + server OpenAI-compat na porta 1234.
+# Idempotente. Chamado pelo entrypoint no boot quando o LM Studio esta' instalado,
+# e disponivel para (re)start manual:
+#   docker compose exec openclaw-vibestack start-lmstudio
+#
+# IMPORTANTE: no 1o uso depois de um build, o 'lms' e' um bootstrapper que baixa e
+# extrai ~750MB de runtime e REESCREVE o proprio binario. Durante essa janela
+# (~1-2 min) qualquer chamada a 'lms' pode falhar com "Text file busy" ou
+# "Invalid passkey" (CLI novo x daemon velho). Por isso aqui toleramos erro e
+# re-tentamos ate o daemon responder de forma consistente. O Dockerfile ja' faz
+# esse bootstrap no build, entao em boots normais isso e' instantaneo.
+if ! command -v lms >/dev/null 2>&1; then
+  echo "[start-lmstudio] lms nao instalado nesta imagem (INSTALL_LMSTUDIO=false). Nada a fazer."
+  exit 0
+fi
+export HOME="${HOME:-/root}"
+if curl -sf http://127.0.0.1:1234/v1/models >/dev/null 2>&1; then
+  echo "[start-lmstudio] LM Studio server ja' esta' rodando (porta 1234)."
+  exit 0
+fi
+echo "[start-lmstudio] subindo daemon llmster (1o uso pos-build pode levar 1-2 min p/ extrair o runtime)..."
+lms daemon up >/var/log/lmstudio.log 2>&1 || true
+# Espera o daemon + CLI ficarem saudaveis. 'lms ls' so' retorna 0 quando o binario
+# ja' assentou e a passkey casa — tolera "Text file busy"/passkey durante a extracao.
+i=1
+while [ "$i" -le 60 ]; do
+  if lms ls >/dev/null 2>&1; then break; fi
+  i=$((i + 1))
+  sleep 2
+done
+# --bind 0.0.0.0: aceita conexoes da rede (necessario p/ o proxy do Docker alcancar
+# a porta publicada em loopback no host). NAO e' '--host' (flag inexistente nesta CLI).
+lms server start --port 1234 --bind 0.0.0.0 >>/var/log/lmstudio.log 2>&1 || true
+i=1
+while [ "$i" -le 30 ]; do
+  if curl -sf http://127.0.0.1:1234/v1/models >/dev/null 2>&1; then
+    echo "[start-lmstudio] LM Studio pronto (porta 1234, API OpenAI-compat em /v1)."
+    exit 0
+  fi
+  i=$((i + 1))
+  sleep 2
+done
+echo "[start-lmstudio] AVISO: server nao respondeu a tempo (log: /var/log/lmstudio.log). Rode de novo: start-lmstudio"

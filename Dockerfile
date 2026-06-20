@@ -1,0 +1,181 @@
+# syntax=docker/dockerfile:1.6
+FROM node:24-bookworm
+
+ARG OPENCLAW_REPO=https://github.com/openclaw/openclaw.git
+ARG OPENCLAW_REF=main
+ENV HOME=/root
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git ca-certificates curl socat zstd python3 python3-pip ffmpeg ripgrep \
+ && rm -rf /var/lib/apt/lists/*
+
+# uv: instala Python 3.12 inline (bookworm so traz ate 3.11).
+RUN curl -fsSL https://astral.sh/uv/install.sh | sh \
+ && ln -sf /root/.local/bin/uv /usr/local/bin/uv \
+ && ln -sf /root/.local/bin/uvx /usr/local/bin/uvx
+
+# Meta Ads CLI oficial (pacote 'meta-ads' no PyPI, publicado por Meta em 2026-04-29).
+# Instala em venv isolado gerenciado por uv; binario fica em /root/.local/bin/meta.
+RUN uv tool install --python 3.12 meta-ads
+
+# Higgsfield CLI (geracao de imagem/video, soul-id). Node 24 ja' presente -> npm.
+# Binario 'higgsfield' no PATH. Auth via `higgsfield auth login` (OAuth no navegador);
+# o token vai pra ~/.higgsfield, persistido em volume pelo compose (sobrevive a restart).
+RUN npm install -g @higgsfield/cli
+
+# AtlasCloud — MCP server OFICIAL (hub de 300+ modelos: imagem/video/LLM).
+# Instalado global (evita download via npx a cada spawn); binario 'atlascloud-mcp'
+# em /usr/local/bin. Auth 100% por env ATLASCLOUD_API_KEY (sem login/volume).
+RUN npm install -g atlascloud-mcp
+
+# Python SDK do MCP para os middlewares customizados (meta_ads_cli_mcp.py, media_editor_mcp.py).
+# Venv criado por uv vem sem pip — usamos `uv pip install` no venv ativo via VIRTUAL_ENV.
+# boto3 e' usado pelo media_editor_mcp.py como cliente S3-compatible do Backblaze B2.
+RUN uv venv --python 3.12 /opt/middleware-venv \
+ && VIRTUAL_ENV=/opt/middleware-venv uv pip install --no-cache "mcp>=1.0" "boto3>=1.30"
+
+ENV PATH=/root/.local/bin:$PATH
+
+# ============================================================
+# Backends de modelos locais — Ollama e/ou LM Studio.
+# O ./install.sh pergunta qual instalar e grava INSTALL_OLLAMA / INSTALL_LMSTUDIO
+# no .env; o compose passa como build args. Baixa-se APENAS o(s) escolhido(s).
+# O que for instalado SOBE no boot (o entrypoint detecta via `command -v`).
+# Adicionar o outro depois = novo `docker compose build`.
+# ============================================================
+ARG INSTALL_OLLAMA=true
+ARG INSTALL_LMSTUDIO=false
+
+# Ollama (condicional). O script oficial baixa o binario, instala em
+# /usr/local/bin/ollama e tenta criar servico systemd (ignorado em container).
+RUN if [ "$INSTALL_OLLAMA" = "true" ]; then \
+      curl -fsSL https://ollama.com/install.sh | sh; \
+    else \
+      echo "[build] INSTALL_OLLAMA=$INSTALL_OLLAMA -> pulando Ollama"; \
+    fi
+
+# Pasta persistente dos modelos do Ollama — montada como volume pelo compose.
+ENV OLLAMA_MODELS=/var/lib/ollama
+RUN mkdir -p /var/lib/ollama
+
+# LM Studio headless (condicional) — engine 'llmster' + CLI 'lms', instalado em
+# /root/.lmstudio/bin (instalador nao-interativo, sem GUI). Alias 'lms' no PATH.
+# Modelos em /root/.lmstudio/models (montado como volume pelo compose, igual ao
+# Ollama). Auth nao e' necessaria p/ modelos publicos (lms get). Sobe no boot.
+RUN if [ "$INSTALL_LMSTUDIO" = "true" ]; then \
+      curl -fsSL https://lmstudio.ai/install.sh | bash \
+      && ln -sf /root/.lmstudio/bin/lms /usr/local/bin/lms \
+      && mkdir -p /root/.lmstudio/models \
+      && echo "[build] bootstrap do LM Studio (baixa/extrai o runtime e materializa o binario)..." \
+      && (lms daemon up >/tmp/lms-bootstrap.log 2>&1 || true) \
+      && for i in $(seq 1 90); do lms ls >/dev/null 2>&1 && break; sleep 2; done \
+      && (lms daemon down >/dev/null 2>&1 || true) \
+      && (lms version >/dev/null 2>&1 && echo "[build] LM Studio OK" || echo "[build] AVISO: bootstrap do LM Studio nao confirmou — o 1o boot fara o setup"); \
+    else \
+      echo "[build] INSTALL_LMSTUDIO=$INSTALL_LMSTUDIO -> pulando LM Studio"; \
+    fi
+
+# Helpers de (re)start e diagnostico dos backends locais. Usados pelo entrypoint
+# no boot (sobe o que estiver instalado) e disponiveis para uso manual via
+# `docker compose exec`. Idempotentes; cada um checa se o engine existe.
+COPY scripts/start-ollama scripts/start-lmstudio scripts/models-status /usr/local/bin/
+RUN chmod +x /usr/local/bin/start-ollama /usr/local/bin/start-lmstudio /usr/local/bin/models-status
+
+# ============================================================
+# >>> BINÁRIOS CUSTOMIZADOS — adicione aqui suas dependências <<<
+# Cada bloco baixa, extrai e dá chmod +x em /usr/local/bin/<nome>.
+# Os repos do openclaw incluem a versão no nome do asset, então
+# usamos ARG por binário — fácil de atualizar quando subir versão.
+# ============================================================
+
+ARG GOGCLI_VERSION=0.19.0
+ARG GOPLACES_VERSION=0.4.3
+ARG WACLI_VERSION=0.11.0
+
+# gogcli (instala como `gog`)
+RUN curl -fL "https://github.com/openclaw/gogcli/releases/download/v${GOGCLI_VERSION}/gogcli_${GOGCLI_VERSION}_linux_amd64.tar.gz" \
+       | tar -xzO gog > /usr/local/bin/gog \
+ && chmod +x /usr/local/bin/gog
+
+# goplaces
+RUN curl -fL "https://github.com/openclaw/goplaces/releases/download/v${GOPLACES_VERSION}/goplaces_${GOPLACES_VERSION}_linux_amd64.tar.gz" \
+       | tar -xzO goplaces > /usr/local/bin/goplaces \
+ && chmod +x /usr/local/bin/goplaces
+
+# wacli
+RUN curl -fL "https://github.com/openclaw/wacli/releases/download/v${WACLI_VERSION}/wacli_${WACLI_VERSION}_linux_amd64.tar.gz" \
+       | tar -xzO wacli > /usr/local/bin/wacli \
+ && chmod +x /usr/local/bin/wacli
+
+# ============================================================
+
+WORKDIR /app
+
+# Clona o source do openclaw na versão escolhida (branch, tag ou commit leve)
+RUN git clone --depth 1 --branch "${OPENCLAW_REF}" "${OPENCLAW_REPO}" /tmp/openclaw \
+ && cp -a /tmp/openclaw/. /app/ \
+ && rm -rf /tmp/openclaw
+
+RUN corepack enable \
+ && pnpm install --frozen-lockfile \
+ && pnpm build \
+ && pnpm ui:install \
+ && pnpm ui:build
+
+# Wrapper para usar `openclaw <comando>` em vez de `node dist/index.js <comando>`
+RUN printf '#!/bin/sh\nexec node /app/dist/index.js "$@"\n' > /usr/local/bin/openclaw \
+ && chmod +x /usr/local/bin/openclaw
+
+# ============================================================
+# Hermes Agent — alternativa ao OpenClaw (NousResearch).
+# Mesmo padrao dos blocos acima: clone pinado + venv uv (Python 3.11) +
+# extra [all] (browser, mcp, messaging, etc.). O entrypoint sobe o
+# api_server OpenAI-compatible na 8642 e registra os MESMOS middlewares
+# MCP (meta-ads, media-editor) que o OpenClaw usa.
+#
+# Codigo fica em /opt/hermes-agent (fora do volume); dados em
+# /root/.hermes (HERMES_HOME, montado como volume pelo compose).
+# ============================================================
+ARG HERMES_REPO=https://github.com/NousResearch/hermes-agent.git
+ARG HERMES_REF=main
+
+RUN git clone --depth 1 --branch "${HERMES_REF}" "${HERMES_REPO}" /opt/hermes-agent
+
+# venv 3.11 (Hermes exige >=3.11; uv baixa inline) + instala tudo ([all]).
+RUN uv venv --python 3.11 /opt/hermes-agent/venv \
+ && VIRTUAL_ENV=/opt/hermes-agent/venv uv pip install --no-cache -e '/opt/hermes-agent[all]'
+
+# Playwright/Chromium (browser tool) — "instalar tudo". --with-deps puxa as
+# libs de sistema do Chromium via apt (roda como root no build, sem prompt).
+RUN cd /opt/hermes-agent && npx --yes playwright install --with-deps chromium
+
+# Pre-build do dashboard web (Vite/React) que o `hermes dashboard` serve na 9119.
+# Compila pra hermes_cli/web_dist (mesmo comando do erro de --skip-build do
+# Hermes). Assim o entrypoint sobe a UI rapido; sem isso ele compilaria a cada
+# boot. Se a UI nao precisar rebuild, o helper interno do Hermes pula sozinho.
+RUN cd /opt/hermes-agent/web && npm install && npm run build
+
+# Pre-build do TUI (ui-tui) que a aba "Chat" do dashboard spawna via `hermes --tui`.
+# Sem isso, o 1o `hermes --tui` (inclusive o que a aba Chat dispara) faz npm
+# install + build em runtime — o que derruba o WebSocket do chat por timeout/erro.
+# Gera ui-tui/dist/entry.js; em runtime o Hermes detecta que ja' esta' buildado e pula.
+RUN cd /opt/hermes-agent/ui-tui && npm install && npm run build
+
+# Wrapper: limpa PYTHONPATH/PYTHONHOME (igual ao install.sh oficial, pra nao
+# herdar o venv do middleware/uv) e exec o hermes do venv do Hermes.
+RUN printf '#!/usr/bin/env bash\nunset PYTHONPATH PYTHONHOME\nexec /opt/hermes-agent/venv/bin/hermes "$@"\n' \
+      > /usr/local/bin/hermes \
+ && chmod +x /usr/local/bin/hermes
+
+# Middleware MCP que envelopa a CLI 'meta' como tools tipados para o openclaw.
+COPY middleware /app/middleware
+
+# Entrypoint: sobe `ollama serve` em background e exec o CMD (openclaw).
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+ENV NODE_ENV=production
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["openclaw"]

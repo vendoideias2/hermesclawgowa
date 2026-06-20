@@ -1,0 +1,5 @@
+# Dependencias do middleware MCP. Instaladas no venv /opt/middleware-venv
+# pelo Dockerfile via uv. Aqui ficam apenas como documentacao/pin futuro.
+mcp>=1.0
+# media_editor_mcp.py: cliente S3-compatible pro Backblaze B2.
+boto3>=1.30

@@ -1,0 +1,35 @@
+#!/bin/sh
+# Sobe o Ollama em background (idempotente). Chamado pelo entrypoint no boot quando
+# o Ollama esta' instalado na imagem, e disponivel para (re)start manual:
+#   docker compose exec openclaw-vibestack start-ollama
+if ! command -v ollama >/dev/null 2>&1; then
+  echo "[start-ollama] ollama nao instalado nesta imagem (INSTALL_OLLAMA=false). Nada a fazer."
+  exit 0
+fi
+if curl -sf http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+  echo "[start-ollama] ollama ja' esta' rodando (porta 11434)."
+  exit 0
+fi
+nohup ollama serve >/var/log/ollama.log 2>&1 &
+OLLAMA_PID=$!
+i=1
+while [ "$i" -le 30 ]; do
+  if curl -sf http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+    echo "[start-ollama] ollama pronto (pid=$OLLAMA_PID, porta 11434)."
+    # Se OLLAMA_AUTO_PULL_MODEL estiver definida, verifica e faz pull do modelo
+    if [ -n "${OLLAMA_AUTO_PULL_MODEL:-}" ]; then
+      echo "[start-ollama] Verificando se o modelo '$OLLAMA_AUTO_PULL_MODEL' ja' existe..."
+      if ! ollama list 2>/dev/null | grep -q "$OLLAMA_AUTO_PULL_MODEL"; then
+        echo "[start-ollama] Modelo nao encontrado localmente. Baixando '$OLLAMA_AUTO_PULL_MODEL' em background (acompanhe em /var/log/ollama-pull.log)..."
+        nohup ollama pull "$OLLAMA_AUTO_PULL_MODEL" >/var/log/ollama-pull.log 2>&1 &
+      else
+        echo "[start-ollama] Modelo '$OLLAMA_AUTO_PULL_MODEL' ja' esta' baixado e pronto para uso."
+      fi
+    fi
+    exit 0
+  fi
+  [ "$i" -eq 30 ] && echo "[start-ollama] AVISO: ollama nao respondeu em 30s (log: /var/log/ollama.log)."
+  i=$((i + 1))
+  sleep 1
+done
+
