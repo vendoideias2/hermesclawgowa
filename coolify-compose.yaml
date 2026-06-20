@@ -1,0 +1,127 @@
+version: "3.8"
+
+services:
+  openclaw-vibestack:
+    image: ${OPENCLAW_IMAGE:-vibestack-openclaw:latest}
+    build:
+      context: .
+      args:
+        OPENCLAW_REF: ${OPENCLAW_REF:-main}
+        # Baixa-se apenas o que estiver 'true' (Ollama por padrao)
+        INSTALL_OLLAMA: ${INSTALL_OLLAMA:-true}
+        INSTALL_LMSTUDIO: ${INSTALL_LMSTUDIO:-false}
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - TERM=xterm-256color
+      - OPENCLAW_GATEWAY_BIND=${OPENCLAW_GATEWAY_BIND}
+      - OPENCLAW_GATEWAY_PORT=${OPENCLAW_GATEWAY_PORT}
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
+      - GOG_KEYRING_PASSWORD=${GOG_KEYRING_PASSWORD}
+      - OLLAMA_MODELS=/var/lib/ollama
+      - OLLAMA_AUTO_PULL_MODEL=${OLLAMA_AUTO_PULL_MODEL:-}
+      - ACCESS_TOKEN=${META_ACCESS_TOKEN}
+      - AD_ACCOUNT_ID=${META_AD_ACCOUNT_ID:-}
+      - META_ACCESS_TOKEN=${META_ACCESS_TOKEN}
+      - ATLASCLOUD_API_KEY=${ATLASCLOUD_API_KEY:-}
+      - PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      - API_SERVER_KEY=${HERMES_API_SERVER_KEY:-}
+      - HERMES_API_PORT=${HERMES_API_PORT:-8642}
+      - GATEWAY_ALLOW_ALL_USERS=${GATEWAY_ALLOW_ALL_USERS:-true}
+      - HERMES_WEB_PORT=${HERMES_WEB_PORT:-9119}
+      - GOWA_BASE_URL=http://gowa:3000
+      - GOWA_BASIC_AUTH=${GOWA_BASIC_AUTH:-}
+      - GOWA_DEVICE_ID=${GOWA_DEVICE_ID:-}
+      - HERMES_APPROVALS_MODE=${HERMES_APPROVALS_MODE:-off}
+      - WA_BRIDGE_AGENT=${WA_BRIDGE_AGENT:-hermes}
+      - WA_BRIDGE_OPENCLAW_AGENT=${WA_BRIDGE_OPENCLAW_AGENT:-}
+      - WA_BRIDGE_PORT=${WA_BRIDGE_PORT:-8765}
+      - WA_BRIDGE_ALLOWED_NUMBERS=${WA_BRIDGE_ALLOWED_NUMBERS:-}
+      - WA_BRIDGE_UPSTREAM_TIMEOUT=${WA_BRIDGE_UPSTREAM_TIMEOUT:-0}
+      - WA_BRIDGE_ACK_AFTER=${WA_BRIDGE_ACK_AFTER:-20}
+    volumes:
+      - openclaw_data:/root/.openclaw
+      - ollama_data:/var/lib/ollama
+      - lmstudio_data:/root/.lmstudio/models
+      - hermes_data:/root/.hermes
+      - higgsfield_data:/root/.higgsfield
+    ports:
+      # Exposta no host para conexoes de API do Ollama
+      - "11434:11434"
+    networks:
+      - default
+      - network_public
+    labels:
+      - "traefik.enable=true"
+      
+      # 1. OpenClaw (https://open.vendoideias.com) -> Porta 18789
+      - "traefik.http.routers.openclaw.rule=Host(`open.vendoideias.com`)"
+      - "traefik.http.routers.openclaw.entrypoints=websecure"
+      - "traefik.http.routers.openclaw.tls=true"
+      - "traefik.http.routers.openclaw.tls.certresolver=letsencryptresolver"
+      - "traefik.http.routers.openclaw.service=openclaw"
+      - "traefik.http.services.openclaw.loadbalancer.server.port=18789"
+      - "traefik.http.services.openclaw.loadbalancer.passHostHeader=true"
+
+      # 2. Hermes Dashboard (https://hermes.vendoideias.com) -> Porta 9119
+      - "traefik.http.routers.hermes-web.rule=Host(`hermes.vendoideias.com`)"
+      - "traefik.http.routers.hermes-web.entrypoints=websecure"
+      - "traefik.http.routers.hermes-web.tls=true"
+      - "traefik.http.routers.hermes-web.tls.certresolver=letsencryptresolver"
+      - "traefik.http.routers.hermes-web.service=hermes-web"
+      - "traefik.http.services.hermes-web.loadbalancer.server.port=9119"
+      - "traefik.http.services.hermes-web.loadbalancer.passHostHeader=true"
+
+      # 3. Hermes API (https://hermes-api.vendoideias.com) -> Porta 8642
+      - "traefik.http.routers.hermes-api.rule=Host(`hermes-api.vendoideias.com`)"
+      - "traefik.http.routers.hermes-api.entrypoints=websecure"
+      - "traefik.http.routers.hermes-api.tls=true"
+      - "traefik.http.routers.hermes-api.tls.certresolver=letsencryptresolver"
+      - "traefik.http.routers.hermes-api.service=hermes-api"
+      - "traefik.http.services.hermes-api.loadbalancer.server.port=8642"
+      - "traefik.http.services.hermes-api.loadbalancer.passHostHeader=true"
+
+  gowa:
+    image: ${GOWA_IMAGE:-aldinokemal2104/go-whatsapp-web-multidevice:latest}
+    restart: unless-stopped
+    command:
+      - rest
+    environment:
+      - APP_PORT=${GOWA_PORT:-3000}
+      - APP_DEBUG=false
+      - WHATSAPP_WEBHOOK=http://openclaw-vibestack:${WA_BRIDGE_PORT:-8765}/webhook
+      - WHATSAPP_WEBHOOK_EVENTS=message
+      - WHATSAPP_WEBHOOK_SECRET=
+      - APP_BASIC_AUTH=${GOWA_BASIC_AUTH:-}
+      - HTTP_PROXY=${GOWA_HTTP_PROXY:-}
+      - HTTPS_PROXY=${GOWA_HTTPS_PROXY:-}
+    volumes:
+      - gowa_data:/app/storages
+    networks:
+      - default
+      - network_public
+    labels:
+      - "traefik.enable=true"
+      
+      # 4. GOWA (https://gowa.vendoideias.com) -> Porta 3000
+      - "traefik.http.routers.gowa.rule=Host(`gowa.vendoideias.com`)"
+      - "traefik.http.routers.gowa.entrypoints=websecure"
+      - "traefik.http.routers.gowa.tls=true"
+      - "traefik.http.routers.gowa.tls.certresolver=letsencryptresolver"
+      - "traefik.http.routers.gowa.service=gowa"
+      - "traefik.http.services.gowa.loadbalancer.server.port=3000"
+      - "traefik.http.services.gowa.loadbalancer.passHostHeader=true"
+
+volumes:
+  openclaw_data:
+  ollama_data:
+  lmstudio_data:
+  hermes_data:
+  higgsfield_data:
+  gowa_data:
+
+networks:
+  network_public:
+    external: true
