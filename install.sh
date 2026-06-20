@@ -527,20 +527,20 @@ if { [ "$FRESH_ENV" = "1" ] || [ "$RECONFIG" = "1" ]; } && [ "$INTERACTIVE" = "1
     info 'media-editor pulado — preencha os B2_* no .env depois se precisar.'
   fi
 
-  # Domínios fixos da VPS (conforme solicitado pelo usuário ericorenato)
-  if ask_yesno 'Configurar os domínios fixos da VPS (Vendo Ideias)?' 'y'; then
-    set_env_var .env DOMAIN_HERMES "https://hermes.vendoideias.com"
-    set_env_var .env DOMAIN_OPENCLAW "https://open.vendoideias.com"
-    set_env_var .env DOMAIN_GOWA "https://gowa.vendoideias.com"
-    info "Domínios fixos configurados: hermes.vendoideias.com, open.vendoideias.com, gowa.vendoideias.com"
-  else
-    domain_h="$(ask 'Domínio para o Hermes (ex: https://hermes.vendoideias.com)' "$(get_env_var .env DOMAIN_HERMES)")"
-    domain_o="$(ask 'Domínio para o OpenClaw (ex: https://open.vendoideias.com)' "$(get_env_var .env DOMAIN_OPENCLAW)")"
-    domain_g="$(ask 'Domínio para o GOWA (ex: https://gowa.vendoideias.com)' "$(get_env_var .env DOMAIN_GOWA)")"
-    [ -n "$domain_h" ] && set_env_var .env DOMAIN_HERMES "$domain_h"
-    [ -n "$domain_o" ] && set_env_var .env DOMAIN_OPENCLAW "$domain_o"
-    [ -n "$domain_g" ] && set_env_var .env DOMAIN_GOWA "$domain_g"
-  fi
+  # Domínios para as stacks com acesso externo
+  cur_h="$(get_env_var .env DOMAIN_HERMES)"; [ -z "$cur_h" ] && cur_h="https://hermes.vendoideias.com"
+  cur_o="$(get_env_var .env DOMAIN_OPENCLAW)"; [ -z "$cur_o" ] && cur_o="https://open.vendoideias.com"
+  cur_g="$(get_env_var .env DOMAIN_GOWA)"; [ -z "$cur_g" ] && cur_g="https://gowa.vendoideias.com"
+
+  domain_h="$(ask 'Domínio para o Hermes (ex: https://hermes.vendoideias.com)' "$cur_h")"
+  domain_o="$(ask 'Domínio para o OpenClaw (ex: https://open.vendoideias.com)' "$cur_o")"
+  domain_g="$(ask 'Domínio para o GOWA (ex: https://gowa.vendoideias.com)' "$cur_g")"
+
+  [ -n "$domain_h" ] && set_env_var .env DOMAIN_HERMES "$domain_h"
+  [ -n "$domain_o" ] && set_env_var .env DOMAIN_OPENCLAW "$domain_o"
+  [ -n "$domain_g" ] && set_env_var .env DOMAIN_GOWA "$domain_g"
+  
+  info "Domínios configurados: $domain_h, $domain_o, $domain_g"
 
   # Porta do GOWA
   gowa_port="$(ask 'Porta do serviço GOWA' "$(get_env_var .env GOWA_PORT)")"
