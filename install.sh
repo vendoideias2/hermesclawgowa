@@ -250,7 +250,55 @@ if ! docker info >/dev/null 2>&1; then
 fi
 info "Docker daemon OK."
 
-# --- 3. resolver caminhos dos volumes --------------------------------------
+# --- 3. Swap (Linux) --------------------------------------------------------
+if [ "$OS" = "linux" ]; then
+  step "Verificando Swap (Linux)"
+  
+  # Verifica se já existe Swap ativa
+  swap_total=$(free -m | awk '/^Swap:/{print $2}')
+  if [ "${swap_total:-0}" -gt 0 ]; then
+    info "Swap ja' ativa no sistema (${swap_total}MB). Pulando criacao."
+  else
+    info "Nenhuma Swap ativa detectada."
+    if ask_yesno "Deseja criar automaticamente uma particao Swap do tamanho da memoria RAM?" "y"; then
+      # Detecta RAM total
+      ram_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+      ram_mb=$((ram_kb / 1024))
+      
+      info "Memoria RAM detectada: ${ram_mb}MB. Configurando swapfile..."
+      
+      if [ -f /swapfile ]; then
+        warn "/swapfile ja' existe no disco. Pulando criacao para evitar sobrescrever."
+      else
+        info "Criando /swapfile de ${ram_mb}MB (isso pode levar alguns segundos)..."
+        
+        # Cria o arquivo de swap
+        if as_root fallocate -l "${ram_kb}K" /swapfile 2>/dev/null; then
+          as_root chmod 600 /swapfile
+          as_root mkswap /swapfile
+          as_root swapon /swapfile
+        else
+          # Fallback se fallocate nao funcionar (ex: alguns sistemas de arquivos)
+          as_root dd if=/dev/zero of=/swapfile bs=1k count="$ram_kb" status=progress
+          as_root chmod 600 /swapfile
+          as_root mkswap /swapfile
+          as_root swapon /swapfile
+        fi
+
+        # Adiciona ao fstab para persistir após restart
+        if ! grep -q '/swapfile' /etc/fstab 2>/dev/null; then
+          echo '/swapfile none swap sw 0 0' | as_root tee -a /etc/fstab >/dev/null
+        fi
+        
+        info "Swap de ${ram_mb}MB criada e ativada com sucesso!"
+      fi
+    else
+      info "Criacao de Swap pulada pelo usuario."
+    fi
+  fi
+fi
+
+# --- 4. resolver caminhos dos volumes --------------------------------------
 step "Resolvendo diretorios de dados (volumes)"
 HOME_BASH="$HOME"                 # caminho do shell, usado pro mkdir
 HOME_ENV="$HOME"                  # caminho gravado no .env / lido pelo Compose
