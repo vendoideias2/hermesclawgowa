@@ -298,7 +298,43 @@ if [ "$OS" = "linux" ]; then
   fi
 fi
 
-# --- 4. resolver caminhos dos volumes --------------------------------------
+# --- 4. Firewall UFW (Linux) ------------------------------------------------
+if [ "$OS" = "linux" ]; then
+  step "Configurando Firewall (UFW)"
+  
+  if ! command -v ufw >/dev/null 2>&1; then
+    info "UFW (Uncomplicated Firewall) nao instalado. Instale-o se quiser aplicar regras de segurança."
+  else
+    if ask_yesno "Deseja configurar o UFW para permitir apenas portas do projeto (SSH/22, HTTP/80, HTTPS/443, OpenClaw/18789, Ollama/11434, GOWA/3000, Hermes API/8642, Hermes Web/9119)?" "y"; then
+      info "Configurando regras do UFW..."
+      
+      # Bloqueio padrão
+      as_root ufw default deny incoming
+      as_root ufw default allow outgoing
+      
+      # Regras permitindo portas essenciais e do projeto
+      as_root ufw allow 22/tcp comment 'SSH'
+      as_root ufw allow 80/tcp comment 'HTTP'
+      as_root ufw allow 443/tcp comment 'HTTPS'
+      as_root ufw allow 18789/tcp comment 'OpenClaw Gateway'
+      as_root ufw allow 11434/tcp comment 'Ollama API'
+      as_root ufw allow 3000/tcp comment 'GOWA API'
+      as_root ufw allow 8642/tcp comment 'Hermes API'
+      as_root ufw allow 9119/tcp comment 'Hermes Dashboard'
+      
+      # Habilitar o firewall
+      info "Ativando o UFW..."
+      echo "y" | as_root ufw enable
+      
+      info "Firewall ativado com sucesso! Portas liberadas: 22, 80, 443, 18789, 11434, 3000, 8642, 9119."
+      as_root ufw status verbose
+    else
+      info "Configuracao de firewall pulada pelo usuario."
+    fi
+  fi
+fi
+
+# --- 5. resolver caminhos dos volumes --------------------------------------
 step "Resolvendo diretorios de dados (volumes)"
 HOME_BASH="$HOME"                 # caminho do shell, usado pro mkdir
 HOME_ENV="$HOME"                  # caminho gravado no .env / lido pelo Compose
