@@ -113,6 +113,10 @@ services:
       - "traefik.http.routers.gowa.service=gowa"
       - "traefik.http.services.gowa.loadbalancer.server.port=3000"
       - "traefik.http.services.gowa.loadbalancer.passHostHeader=true"
+      
+      # Strip Cookies to prevent "Request Header Fields Too Large"
+      - "traefik.http.middlewares.gowa-strip-cookie.headers.customrequestheaders.Cookie="
+      - "traefik.http.routers.gowa.middlewares=gowa-strip-cookie"
 
 volumes:
   openclaw_data:

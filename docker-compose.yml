@@ -16,17 +16,17 @@ services:
       #- HOME=/root
       - NODE_ENV=production
       - TERM=xterm-256color
-      - OPENCLAW_GATEWAY_BIND=${OPENCLAW_GATEWAY_BIND}
-      - OPENCLAW_GATEWAY_PORT=${OPENCLAW_GATEWAY_PORT}
-      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
-      - GOG_KEYRING_PASSWORD=${GOG_KEYRING_PASSWORD}
+      - OPENCLAW_GATEWAY_BIND=${OPENCLAW_GATEWAY_BIND:-lan}
+      - OPENCLAW_GATEWAY_PORT=${OPENCLAW_GATEWAY_PORT:-18789}
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-}
+      - GOG_KEYRING_PASSWORD=${GOG_KEYRING_PASSWORD:-}
       - OLLAMA_MODELS=/var/lib/ollama
       - OLLAMA_AUTO_PULL_MODEL=${OLLAMA_AUTO_PULL_MODEL:-}
       # Meta Ads CLI oficial le ACCESS_TOKEN/AD_ACCOUNT_ID; mantemos META_ACCESS_TOKEN
       # como alias historico para o .env nao mudar.
-      - ACCESS_TOKEN=${META_ACCESS_TOKEN}
+      - ACCESS_TOKEN=${META_ACCESS_TOKEN:-}
       - AD_ACCOUNT_ID=${META_AD_ACCOUNT_ID:-}
-      - META_ACCESS_TOKEN=${META_ACCESS_TOKEN}
+      - META_ACCESS_TOKEN=${META_ACCESS_TOKEN:-}
       # AtlasCloud — MCP oficial (hub de modelos). Auth so' por API key via env.
       - ATLASCLOUD_API_KEY=${ATLASCLOUD_API_KEY:-}
       - PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -62,9 +62,9 @@ services:
       - WA_BRIDGE_ACK_AFTER=${WA_BRIDGE_ACK_AFTER:-20}
     volumes:
       # UM mount só, abrangendo tudo do OpenClaw
-      - ${OPENCLAW_DATA_DIR}:/root/.openclaw
+      - ${OPENCLAW_DATA_DIR:-/root/.openclaw}:/root/.openclaw
       # Ollama em mount separado (faz sentido — outro app)
-      - ${OLLAMA_DATA_DIR}:/var/lib/ollama
+      - ${OLLAMA_DATA_DIR:-/root/.ollama}:/var/lib/ollama
       # LM Studio — persiste SO' os modelos (o engine/CLI ficam na imagem, igual ao
       # Ollama que persiste so' /var/lib/ollama). So' tem efeito se INSTALL_LMSTUDIO=true.
       - ${LMSTUDIO_DATA_DIR:-/root/.lmstudio}:/root/.lmstudio/models
@@ -76,7 +76,7 @@ services:
       # Persistente pra que a sessao sobreviva a restart/rebuild (aluno loga 1x).
       - ${HIGGSFIELD_DATA_DIR:-/root/.higgsfield}:/root/.higgsfield
     ports:
-      - "${OPENCLAW_GATEWAY_PORT}:18789"
+      - "${OPENCLAW_GATEWAY_PORT:-18789}:18789"
       # Porta do Ollama acessivel diretamente no host
       - "11434:11434"
       # LM Studio — API OpenAI-compat (se ativado)
@@ -85,13 +85,45 @@ services:
       - "${HERMES_API_PORT:-8642}:8642"
       # Hermes — dashboard web (pagina de gestao/chat)
       - "${HERMES_WEB_PORT:-9119}:9119"
+    networks:
+      - default
+      - network_public
+    labels:
+      - "traefik.enable=true"
+      
+      # 1. OpenClaw (https://open.vendoideias.com) -> Porta 18789
+      - "traefik.http.routers.openclaw.rule=Host(`open.vendoideias.com`)"
+      - "traefik.http.routers.openclaw.entrypoints=websecure"
+      - "traefik.http.routers.openclaw.tls=true"
+      - "traefik.http.routers.openclaw.tls.certresolver=letsencryptresolver"
+      - "traefik.http.routers.openclaw.service=openclaw"
+      - "traefik.http.services.openclaw.loadbalancer.server.port=18789"
+      - "traefik.http.services.openclaw.loadbalancer.passHostHeader=true"
+
+      # 2. Hermes Dashboard (https://hermes.vendoideias.com) -> Porta 9119
+      - "traefik.http.routers.hermes-web.rule=Host(`hermes.vendoideias.com`)"
+      - "traefik.http.routers.hermes-web.entrypoints=websecure"
+      - "traefik.http.routers.hermes-web.tls=true"
+      - "traefik.http.routers.hermes-web.tls.certresolver=letsencryptresolver"
+      - "traefik.http.routers.hermes-web.service=hermes-web"
+      - "traefik.http.services.hermes-web.loadbalancer.server.port=9119"
+      - "traefik.http.services.hermes-web.loadbalancer.passHostHeader=true"
+
+      # 3. Hermes API (https://hermes-api.vendoideias.com) -> Porta 8642
+      - "traefik.http.routers.hermes-api.rule=Host(`hermes-api.vendoideias.com`)"
+      - "traefik.http.routers.hermes-api.entrypoints=websecure"
+      - "traefik.http.routers.hermes-api.tls=true"
+      - "traefik.http.routers.hermes-api.tls.certresolver=letsencryptresolver"
+      - "traefik.http.routers.hermes-api.service=hermes-api"
+      - "traefik.http.services.hermes-api.loadbalancer.server.port=8642"
+      - "traefik.http.services.hermes-api.loadbalancer.passHostHeader=true"
     command:
       - "openclaw"
       - "gateway"
       - "--bind"
-      - "${OPENCLAW_GATEWAY_BIND}"
+      - "${OPENCLAW_GATEWAY_BIND:-lan}"
       - "--port"
-      - "${OPENCLAW_GATEWAY_PORT}"
+      - "${OPENCLAW_GATEWAY_PORT:-18789}"
       - "--allow-unconfigured"
 
   # ============================================================
@@ -116,3 +148,26 @@ services:
       - ${GOWA_DATA_DIR:-/root/.gowa}:/app/storages
     ports:
       - "${GOWA_PORT:-3000}:3000"
+    networks:
+      - default
+      - network_public
+    labels:
+      - "traefik.enable=true"
+      
+      # GOWA (https://gowa.vendoideias.com) -> Porta 3000
+      - "traefik.http.routers.gowa.rule=Host(`gowa.vendoideias.com`)"
+      - "traefik.http.routers.gowa.entrypoints=websecure"
+      - "traefik.http.routers.gowa.tls=true"
+      - "traefik.http.routers.gowa.tls.certresolver=letsencryptresolver"
+      - "traefik.http.routers.gowa.service=gowa"
+      - "traefik.http.services.gowa.loadbalancer.server.port=3000"
+      - "traefik.http.services.gowa.loadbalancer.passHostHeader=true"
+      
+      # Strip Cookies to prevent "Request Header Fields Too Large"
+      - "traefik.http.middlewares.gowa-strip-cookie.headers.customrequestheaders.Cookie="
+      - "traefik.http.routers.gowa.middlewares=gowa-strip-cookie"
+
+networks:
+  default:
+  network_public:
+    external: true
