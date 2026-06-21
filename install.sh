@@ -4,7 +4,7 @@
 #
 # Dois modos de uso:
 #   1) Dentro do repo:   ./install.sh
-#   2) Direto da web:    curl -fsSL https://raw.githubusercontent.com/ericorenato/vibestack-openclaw/main/install.sh | bash
+#   2) Direto da web:    curl -fsSL https://raw.githubusercontent.com/vendoideias2/hermesclawgowa/main/install.sh | bash
 #      (nesse modo ele clona o repo sozinho e se re-executa)
 #
 # Idempotente: pode rodar quantas vezes quiser. Prepara tudo ate o
@@ -88,7 +88,7 @@ ensure_git() {
 
 # --- 0. bootstrap (curl | bash) --------------------------------------------
 # Se rodando solto (sem o repo por perto), clona do GitHub e se re-executa.
-REPO_URL="${OPENCLAW_REPO_URL:-https://github.com/ericorenato/vibestack-openclaw.git}"
+REPO_URL="${OPENCLAW_REPO_URL:-https://github.com/vendoideias2/hermesclawgowa.git}"
 REPO_BRANCH="${OPENCLAW_REPO_BRANCH:-main}"
 
 SELF="${BASH_SOURCE[0]:-$0}"

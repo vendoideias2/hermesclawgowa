@@ -108,7 +108,7 @@ Duas maneiras de chamá-lo:
 No terminal (Mac/Linux: terminal normal; Windows: **Git Bash ou WSL**, não PowerShell/CMD):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ericorenato/vibestack-openclaw/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/vendoideias2/hermesclawgowa/main/install.sh | bash
 ```
 
 Ele clona o repo em `./vibestack-openclaw` (mude o destino com `OPENCLAW_DIR=/caminho`) e se re-executa de lá. Mesmo vindo de um `curl | bash`, lê suas respostas do terminal (`/dev/tty`). Requer o repositório **público**. Como ele cria um `.env` novo, você vai **digitar os tokens da Meta/B2 do zero**.
@@ -118,8 +118,8 @@ Ele clona o repo em `./vibestack-openclaw` (mude o destino com `OPENCLAW_DIR=/ca
 No Windows, rode em **Git Bash ou WSL** (não PowerShell/CMD):
 
 ```bash
-git clone https://github.com/ericorenato/vibestack-openclaw.git
-cd vibestack-openclaw
+git clone https://github.com/vendoideias2/hermesclawgowa.git
+cd hermesclawgowa
 ./install.sh
 ```
 
@@ -143,8 +143,8 @@ Pra quem quer controle total ou entender cada parte. Faz exatamente o que o inst
 
 ```bash
 # 1. Clone o repo e entre nele
-git clone https://github.com/ericorenato/vibestack-openclaw.git
-cd vibestack-openclaw
+git clone https://github.com/vendoideias2/hermesclawgowa.git
+cd hermesclawgowa
 
 # 2. Crie os diretórios de dados (volumes persistentes) no SEU SO.
 #    Mac/Windows:
@@ -245,8 +245,8 @@ apt-get install -y docker-compose-plugin
 
 ```bash
 cd ~
-git clone https://github.com/ericorenato/vibestack-openclaw.git
-cd vibestack-openclaw
+git clone https://github.com/vendoideias2/hermesclawgowa.git
+cd hermesclawgowa
 ```
 
 > Substitua a URL pelo fork seu se for o caso.
