@@ -127,25 +127,47 @@ services:
       - "--allow-unconfigured"
 
   # ============================================================
+  # Banco de dados PostgreSQL para persistência do GOWA.
+  # Salva as sessões do WhatsApp de forma centralizada.
+  # ============================================================
+  postgres:
+    image: ${GOWA_PG_IMAGE:-pgvector/pgvector:pg16}
+    restart: unless-stopped
+    environment:
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=postgres
+    volumes:
+      - ${POSTGRES_DATA_DIR:-/root/.gowa-pg}:/var/lib/postgresql/data
+      - ./postgres/init-gowa-db.sql:/docker-entrypoint-initdb.d/init-gowa-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ============================================================
   # WhatsApp backend — GOWA (Go WhatsApp Web Multi-Device).
   # O container openclaw-vibestack alcança a API por http://gowa:3000.
+  # GOWA conecta no PostgreSQL para salvar as credenciais e sessões.
   # ============================================================
   gowa:
     image: ${GOWA_IMAGE:-aldinokemal2104/go-whatsapp-web-multidevice}
     restart: unless-stopped
     command:
       - rest
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       - APP_PORT=${GOWA_PORT:-3000}
       - APP_DEBUG=false
+      - DB_URI=postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/gowa_db?sslmode=disable
       - WHATSAPP_WEBHOOK=http://openclaw-vibestack:${WA_BRIDGE_PORT:-8765}/webhook
       - WHATSAPP_WEBHOOK_EVENTS=message
       - WHATSAPP_WEBHOOK_SECRET=
       - APP_BASIC_AUTH=${GOWA_BASIC_AUTH:-}
       - HTTP_PROXY=${GOWA_HTTP_PROXY:-}
       - HTTPS_PROXY=${GOWA_HTTPS_PROXY:-}
-    volumes:
-      - ${GOWA_DATA_DIR:-/root/.gowa}:/app/storages
     ports:
       - "${GOWA_PORT:-3000}:3000"
     networks:

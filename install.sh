@@ -348,19 +348,19 @@ OLLAMA_DATA_DIR_VAL="${HOME_ENV}/.ollama"
 HERMES_DATA_DIR_VAL="${HOME_ENV}/.hermes"
 HIGGSFIELD_DATA_DIR_VAL="${HOME_ENV}/.higgsfield"
 LMSTUDIO_DATA_DIR_VAL="${HOME_ENV}/.lmstudio"
-GOWA_DATA_DIR_VAL="${HOME_ENV}/.gowa"
+POSTGRES_DATA_DIR_VAL="${HOME_ENV}/.gowa-pg"
 info "OpenClaw data -> $OPENCLAW_DATA_DIR_VAL"
 info "Ollama data   -> $OLLAMA_DATA_DIR_VAL"
 info "Hermes data   -> $HERMES_DATA_DIR_VAL"
 info "Higgsfield    -> $HIGGSFIELD_DATA_DIR_VAL"
 info "LM Studio data-> $LMSTUDIO_DATA_DIR_VAL"
-info "GOWA data     -> $GOWA_DATA_DIR_VAL"
+info "GOWA Postgres -> $POSTGRES_DATA_DIR_VAL"
 
 # --- 3b. instalacao anterior? reaproveitar ou comecar do zero --------------
 # Detecta diretorios de dados ja' existentes (config, modelos do Ollama,
 # sessoes, bancos). Reaproveitar mantem tudo; "do zero" APAGA esses diretorios.
 EXISTING_DIRS=""
-for d in .openclaw .ollama .hermes .higgsfield .lmstudio .gowa; do
+for d in .openclaw .ollama .hermes .higgsfield .lmstudio .gowa-pg; do
   [ -d "${HOME_BASH}/${d}" ] && EXISTING_DIRS="${EXISTING_DIRS} ${HOME_BASH}/${d}"
 done
 if [ -n "$EXISTING_DIRS" ]; then
@@ -466,11 +466,11 @@ else
 fi
 
 # data dirs: sobrescreve apenas se vazio ou se ainda for o default da VPS.
-for pair in "OPENCLAW_DATA_DIR=$OPENCLAW_DATA_DIR_VAL" "OLLAMA_DATA_DIR=$OLLAMA_DATA_DIR_VAL" "HERMES_DATA_DIR=$HERMES_DATA_DIR_VAL" "HIGGSFIELD_DATA_DIR=$HIGGSFIELD_DATA_DIR_VAL" "LMSTUDIO_DATA_DIR=$LMSTUDIO_DATA_DIR_VAL" "GOWA_DATA_DIR=$GOWA_DATA_DIR_VAL"; do
+for pair in "OPENCLAW_DATA_DIR=$OPENCLAW_DATA_DIR_VAL" "OLLAMA_DATA_DIR=$OLLAMA_DATA_DIR_VAL" "HERMES_DATA_DIR=$HERMES_DATA_DIR_VAL" "HIGGSFIELD_DATA_DIR=$HIGGSFIELD_DATA_DIR_VAL" "LMSTUDIO_DATA_DIR=$LMSTUDIO_DATA_DIR_VAL" "POSTGRES_DATA_DIR=$POSTGRES_DATA_DIR_VAL"; do
   key="${pair%%=*}"; target="${pair#*=}"
   cur="$(get_env_var .env "$key")"
   case "$cur" in
-    ""|"/root/.openclaw"|"/root/.ollama"|"/root/.hermes"|"/root/.higgsfield"|"/root/.lmstudio"|"/root/.gowa")
+    ""|"/root/.openclaw"|"/root/.ollama"|"/root/.hermes"|"/root/.higgsfield"|"/root/.lmstudio"|"/root/.gowa-pg")
       set_env_var .env "$key" "$target"
       info "$key definido como $target"
       ;;
@@ -617,7 +617,7 @@ fi
 
 # --- 5. segredos -----------------------------------------------------------
 step "Gerando segredos (se vazios)"
-for key in OPENCLAW_GATEWAY_TOKEN GOG_KEYRING_PASSWORD HERMES_API_SERVER_KEY; do
+for key in OPENCLAW_GATEWAY_TOKEN GOG_KEYRING_PASSWORD HERMES_API_SERVER_KEY POSTGRES_PASSWORD; do
   cur="$(get_env_var .env "$key")"
   if [ -z "$cur" ]; then
     set_env_var .env "$key" "$(gen_secret)"
@@ -645,9 +645,9 @@ if [ -f entrypoint.sh ]; then
   fi
 fi
 
-# --- 7. criar distep "Criando diretorios de dados"
-mkdir -p "${HOME_BASH}/.openclaw" "${HOME_BASH}/.ollama" "${HOME_BASH}/.hermes" "${HOME_BASH}/.higgsfield" "${HOME_BASH}/.lmstudio" "${HOME_BASH}/.gowa"
-info "OK: .openclaw, .ollama, .hermes, .higgsfield, .lmstudio, .gowa (em ${HOME_BASH})"
+# --- 7. Criando diretorios de dados
+mkdir -p "${HOME_BASH}/.openclaw" "${HOME_BASH}/.ollama" "${HOME_BASH}/.hermes" "${HOME_BASH}/.higgsfield" "${HOME_BASH}/.lmstudio" "${HOME_BASH}/.gowa-pg"
+info "OK: .openclaw, .ollama, .hermes, .higgsfield, .lmstudio, .gowa-pg (em ${HOME_BASH})"
 
 # --- 8. build --------------------------------------------------------------
 step "Build da imagem (docker compose build)"
@@ -714,7 +714,7 @@ Dados persistentes:
   ${HERMES_DATA_DIR_VAL}
   ${HIGGSFIELD_DATA_DIR_VAL}
   ${LMSTUDIO_DATA_DIR_VAL}
-  ${GOWA_DATA_DIR_VAL}
+  ${POSTGRES_DATA_DIR_VAL}
 
 EOF
 
