@@ -1,5 +1,7 @@
 hermes.vendoideias.com {
-    reverse_proxy openclaw-vibestack:9119
+    reverse_proxy openclaw-vibestack:9119 {
+        header_up Host localhost
+    }
 }
 
 open.vendoideias.com {
