@@ -8,7 +8,7 @@ Stack Docker self-hosted de uma **agência de tráfego com IA**: o [OpenClaw](ht
 - Um gateway OpenClaw acessível em `http://127.0.0.1:18789` (direto no Mac/Windows; via tunnel SSH na VPS).
 - Modelos locais no mesmo container — escolha **Ollama** e/ou **LM Studio** no instalador (`llama3.2:3b`, `qwen2.5:7b`, etc.) sem dependência de API paga.
 - 70 tools MCP pra Meta Ads (campanhas, ad sets, ads, creatives, insights, catálogos, datasets/pixels, product sets/items/feeds, **custom audiences**, **lookalikes**, **duplicação de campanhas/adsets/ads**) — agente cria/edita/lê/duplica/segmenta direto. 60 via CLI oficial + 10 via Graph API direta (audience/copies, que a CLI não cobre).
-- **Canal de WhatsApp** (Evolution Go): o agente **recebe e responde** mensagens — inclusive interpreta **imagem e áudio** (se o modelo do agente for multimodal). Veja [WhatsApp (Evolution Go)](#whatsapp-evolution-go).
+- **Canal de WhatsApp** (GOWA): o agente **recebe e responde** mensagens — inclusive interpreta **imagem e áudio** (se o modelo do agente for multimodal). Veja [WhatsApp (GOWA)](#whatsapp-gowa).
 - **Geração de mídia** para o Criativo: **Higgsfield** (CLI envelopado em MCP — imagem/vídeo/soul-id) e **AtlasCloud** (MCP oficial, hub de 300+ modelos). Veja [Geração de mídia & hub de modelos](#geração-de-mídia--hub-de-modelos).
 - Bloco demarcado no `Dockerfile` pra "bakear" suas próprias CLIs/binários (gog, goplaces, wacli já vêm de exemplo).
 - **Hermes Agent** (NousResearch) no mesmo container como alternativa ao OpenClaw — API OpenAI-compatible em `http://127.0.0.1:8642/v1`, com acesso aos **mesmos** MCP servers (meta-ads, media-editor, whatsapp, higgsfield, atlascloud). Veja [Hermes Agent](#hermes-agent-alternativa-ao-openclaw).
@@ -38,7 +38,7 @@ Stack Docker self-hosted de uma **agência de tráfego com IA**: o [OpenClaw](ht
 - [Atualizar o projeto na VPS](#atualizar-o-projeto-na-vps)
 - [Backends de modelos locais (Ollama / LM Studio)](#backends-de-modelos-locais-ollama--lm-studio)
 - [Hermes Agent (alternativa ao OpenClaw)](#hermes-agent-alternativa-ao-openclaw)
-- [WhatsApp (Evolution Go)](#whatsapp-evolution-go)
+- [WhatsApp (GOWA)](#whatsapp-gowa)
 - [Geração de mídia & hub de modelos (Higgsfield + AtlasCloud)](#geração-de-mídia--hub-de-modelos)
 - [Referência técnica](#referência-técnica)
 - [Troubleshooting](#troubleshooting)
@@ -48,7 +48,7 @@ Stack Docker self-hosted de uma **agência de tráfego com IA**: o [OpenClaw](ht
 
 ## Arquitetura em uma frase
 
-Um container Docker (`openclaw-vibestack`) que roda **(a)** o gateway do OpenClaw na porta 18789 (loopback), **(b)** o backend de modelos locais que você escolheu instalar — **Ollama** (11434) e/ou **LM Studio** (1234), iniciado automaticamente no boot, **(c)** MCP servers compartilhados pelos agentes — middlewares Python (`meta-ads`, `media-editor`, `whatsapp`, `higgsfield`) + o MCP oficial `atlascloud` (npm), e **(d)** o **Hermes Agent** na 8642/9119 — alternativa ao OpenClaw com as mesmas tools. Ao lado, dois serviços irmãos no compose dão o canal de WhatsApp: **Evolution Go** (whatsmeow) na 8080 + **Postgres**. Tudo em **portas separadas**, coexistindo sem conflito.
+Um container Docker (`openclaw-vibestack`) que roda **(a)** o gateway do OpenClaw na porta 18789 (loopback), **(b)** o backend de modelos locais que você escolheu instalar — **Ollama** (11434) e/ou **LM Studio** (1234), iniciado automaticamente no boot, **(c)** MCP servers compartilhados pelos agentes — middlewares Python (`meta-ads`, `media-editor`, `whatsapp`, `higgsfield`) + o MCP oficial `atlascloud` (npm), e **(d)** o **Hermes Agent** na 8642/9119 — alternativa ao OpenClaw com as mesmas tools. Ao lado, um serviço irmão no compose dá o canal de WhatsApp: **GOWA** (Go WhatsApp Web Multi-Device) na porta 3000 (loopback). Tudo em **portas separadas**, coexistindo sem conflito.
 
 | Serviço            | Porta (loopback) | Processo / serviço                       |
 |--------------------|------------------|------------------------------------------|
@@ -57,8 +57,7 @@ Um container Docker (`openclaw-vibestack`) que roda **(a)** o gateway do OpenCla
 | LM Studio          | 1234             | `lms server` OpenAI-compat (se instalado; sobe no boot) |
 | Hermes API server  | 8642             | `hermes gateway` (api_server)            |
 | Hermes dashboard   | 9119             | `hermes dashboard` (UI gestão/chat)      |
-| Evolution Go       | 8080             | WhatsApp API (whatsmeow) — serviço       |
-| Postgres           | (interno)        | banco do Evolution Go                    |
+| GOWA               | 3000             | WhatsApp API (whatsmeow) — serviço       |
 
 O entrypoint registra o MCP automaticamente no boot via `openclaw mcp set`, propagando `ACCESS_TOKEN`/`AD_ACCOUNT_ID` pro processo filho.
 
@@ -761,91 +760,60 @@ docker compose logs openclaw-vibestack | grep hermes
 
 ---
 
-## WhatsApp (Evolution Go)
+## WhatsApp (GOWA)
 
-O canal de WhatsApp usa o [**Evolution Go**](https://github.com/evolution-foundation/evolution-go)
-— uma API em Go baseada em **`whatsmeow`** (o mesmo protocolo WhatsApp Web; **não usa Baileys**).
-Roda como **serviço separado** no `docker-compose` (imagem `evoapicloud/evolution-go`), com um
-**Postgres** ao lado. Os agentes (OpenClaw e Hermes) enviam mensagens pelo middleware MCP
-`whatsapp` (`middleware/whatsapp_evolution_mcp.py`), que fala com a API pelo DNS do compose
-(`http://evolution-go:8080`) — por isso **não precisa de URL pública**.
+O canal de WhatsApp usa o [**GOWA**](https://github.com/aldinokemal/go-whatsapp-web-multidevice) (Go WhatsApp Web Multi-Device) — uma API em Go baseada em **`whatsmeow`** (o mesmo protocolo WhatsApp Web).
+Roda como **serviço separado** no `docker-compose` (imagem `aldinokemal2104/go-whatsapp-web-multidevice`), sem necessidade de banco de dados externo ou licenças. Os agentes (OpenClaw e Hermes) enviam mensagens pelo middleware MCP `whatsapp` (`middleware/whatsapp_gowa_mcp.py`), que fala com a API pelo DNS do compose (`http://gowa:3000`) — por isso **não precisa de URL pública**.
 
-**Canal completo (inbound + outbound):** além do envio, há um **bridge** inbound
-(`middleware/whatsapp_bridge.py`) que fecha o ciclo — você conversa com o agente pelo WhatsApp:
+**Canal completo (inbound + outbound):** além do envio, há um **bridge** inbound (`middleware/whatsapp_bridge.py`) que fecha o ciclo — você conversa com o agente pelo WhatsApp:
 
 ```
-WhatsApp → Evolution Go (evento "Message") --webhook--> bridge (porta 8765, interna)
+WhatsApp → GOWA (evento "message") --webhook--> bridge (porta 8765, interna)
         → agente escolhido (Hermes api_server  OU  openclaw agent), sessão por número
-        → Evolution Go (/send/text) → WhatsApp
+        → GOWA (/send/message) → WhatsApp
 ```
 
-O `evolution-go` posta os eventos no `WEBHOOK_URL=http://openclaw-vibestack:8765/webhook`
-(DNS do compose, automático). O bridge filtra mensagens **recebidas** (ignora as
-suas próprias, grupos e status), mantém **uma sessão Hermes por contato** (`X-Hermes-Session-Id`),
-responde 200 na hora (o agente pode demorar com tool calls) e processa em background.
+O `gowa` posta os eventos no `WHATSAPP_WEBHOOK=http://openclaw-vibestack:8765/webhook` (DNS do compose, automático). O bridge filtra mensagens **recebidas** (ignora as suas próprias, grupos e status), mantém **uma sessão Hermes por contato** (`X-Hermes-Session-Id`), responde 200 na hora (o agente pode demorar com tool calls) e processa em background.
 
 **Mídia recebida (imagem e áudio).** O bridge também processa **imagem** e **áudio** enviados pelo WhatsApp:
 
-1. Baixa os bytes na ordem **`mediaUrl` (S3/MinIO presigned)** → **`base64` inline** → **`POST /message/downloadmedia`** (on-demand; funciona mesmo sem S3).
+1. Baixa os bytes do arquivo servido de forma estática pelo GOWA (via URL local exposta pelo próprio container GOWA).
 2. Salva em `/root/.openclaw/workspace/_shared/assets/wa/` (persistente).
 3. Manda pro modelo do agente:
    - **Hermes** → conteúdo multimodal OpenAI (`image_url` para imagem, `input_audio` para áudio).
    - **OpenClaw** → passa o caminho do arquivo salvo + legenda no prompt (o agente interpreta com suas tools).
-4. **Se o modelo configurado não aceitar a modalidade** (não é de visão/áudio), o bridge responde avisando que *"o modelo configurado neste agente não interpreta imagens/áudios"* — em vez de erro cru. Como o modelo **varia por agente**, isso depende do que você plugou no Hermes/OpenClaw.
+4. **Se o modelo configurado não aceitar a modalidade** (não é de visão/áudio), o bridge responde avisando que *"o modelo configurado neste agente não interpreta imagens/áudios"*. Como o modelo **varia por agente**, isso depende do que você plugou no Hermes/OpenClaw.
 
-Vídeo/documento ainda não são interpretados (o bridge avisa). Legenda de imagem é usada como prompt. Para o caminho via **S3/Backblaze**, ligue o storage do Evolution (veja abaixo); sem isso, o download on-demand cobre tudo.
+Vídeo/documento ainda não são interpretados (o bridge avisa). Legenda de imagem é usada como prompt.
 
 > **Quem responde (escolha do aluno):** `WA_BRIDGE_AGENT=hermes|openclaw`.
 > - `hermes` → HTTP no api_server (`/v1/chat/completions`, sessão por número).
-> - `openclaw` → CLI `openclaw agent --message ... --to +<número> --json` (sessão por número; `WA_BRIDGE_OPENCLAW_AGENT` opcional escolhe o binding). Não usa `--deliver` — o bridge é quem envia pelo Evolution.
->
-> Troque o agente no `.env` e reinicie. O `WA_BRIDGE_ALLOWED_NUMBERS` (CSV; **vazio = qualquer um**)
-> restringe quem pode falar com o agente — recomendado preencher.
+> - `openclaw` → CLI `openclaw agent --message ... --to +<número> --json` (sessão por número; `WA_BRIDGE_OPENCLAW_AGENT` opcional escolhe o binding). Não usa `--deliver` — o bridge é quem envia pelo GOWA.
 
-**Auth (confirmado no código do Evolution):** header `apikey`. A `EVOLUTION_API_KEY` (global) é
-de admin (criar instância); cada instância tem seu próprio token (`EVOLUTION_INSTANCE_TOKEN`,
-definido no create) usado em envio/QR/status.
+> Troque o agente no `.env` e reinicie. O `WA_BRIDGE_ALLOWED_NUMBERS` (CSV; **vazio = qualquer um**) restringe quem pode falar com o agente — recomendado preencher.
 
-### Storage de mídia recebida (opcional — S3 / Backblaze)
-
-O Evolution Go pode subir a mídia recebida num bucket **S3/MinIO** e mandar a `mediaUrl` (link presigned) no webhook — aí o bridge baixa de lá. É **opcional**: sem isso, a mídia já vem como **base64 inline** no webhook (o compose deixa `WEBHOOK_FILES=true`), então funciona out-of-the-box; ligar o S3 só deixa o payload mais enxuto e guarda uma cópia no seu bucket. Use a variável `MINIO_*` do Evolution (o `install.sh` pergunta isso e deixa reusar as credenciais do Backblaze B2):
-
-```
-EVOLUTION_MINIO_ENABLED=true
-EVOLUTION_MINIO_ENDPOINT=s3.us-west-002.backblazeb2.com   # host SEM https://
-EVOLUTION_MINIO_ACCESS_KEY=<B2_KEY_ID>
-EVOLUTION_MINIO_SECRET_KEY=<B2_APP_KEY>
-EVOLUTION_MINIO_BUCKET=<bucket>
-EVOLUTION_MINIO_REGION=us-west-002
-EVOLUTION_MINIO_USE_SSL=true
-```
-
-O compose mapeia isso pras vars que o Evolution Go lê (`MINIO_ENABLED/ENDPOINT/ACCESS_KEY/SECRET_KEY/BUCKET/USE_SSL/REGION` + `WEBHOOK_FILES`). Quando ligado, a mídia recebida fica também no seu bucket (URLs presigned válidas ~7 dias).
+**Auth:** Opcionalmente via Basic Auth configurada no `.env` (`GOWA_BASIC_AUTH=user:password`). As sessões do WhatsApp são gerenciadas dinamicamente via `device_id` (o padrão é `default`).
 
 ### Subir e parear (uma vez)
 
-Sobe os três serviços (openclaw-vibestack + evolution-go + postgres):
+Sobe a stack Docker (openclaw-vibestack + gowa):
 
 ```bash
 docker compose up -d
 ```
 
-1. **Ativar a licença** (o Evolution responde `503` até ativar) no Manager:
+1. **Acessar a interface do GOWA** (via tunnel SSH na VPS ou direto na máquina local):
    ```bash
-   # VPS: ssh -N -L 8080:127.0.0.1:8080 root@YOUR_VPS_IP
-   # abra http://127.0.0.1:8080/manager/login  (API key = EVOLUTION_API_KEY)
+   # VPS: ssh -N -L 3000:127.0.0.1:3000 root@YOUR_VPS_IP
+   # abra http://127.0.0.1:3000
    ```
-2. **Criar a instância e parear** — pelo agente (tools MCP) ou pelo Manager:
-   - `wa_create_instance` → cria a instância com o `EVOLUTION_INSTANCE_TOKEN`.
-   - `wa_get_qr` → mostra o QR; escaneie no celular (WhatsApp → Aparelhos conectados).
-   - `wa_instance_status` → quando = `connected`, está pronto.
+2. **Gerar QR e parear** — pelo console web do GOWA (porta 3000) ou via ferramentas do agente MCP:
+   - `wa_create_instance` ou `wa_get_qr` → inicia a sessão e gera o QR Code no terminal/retorno da API do GOWA.
+   - Escaneie o QR Code no seu celular (WhatsApp → Aparelhos conectados).
+   - `wa_instance_status` → quando constar status conectado, está pronto.
 3. **Enviar** (qualquer agente): `wa_send_text(number="5511999999999", text="oi")`.
-4. **Conversar (inbound):** com a instância pareada, mande uma mensagem do seu WhatsApp pro
-   número conectado — o bridge entrega ao Hermes e responde. Restrinja quem pode falar via
-   `WA_BRIDGE_ALLOWED_NUMBERS` no `.env`. Log do bridge:
+4. **Conversar (inbound):** com o GOWA pareado, mande uma mensagem do seu WhatsApp pro número conectado — o bridge entrega ao Hermes/OpenClaw e responde. Restrinja quem pode falar via `WA_BRIDGE_ALLOWED_NUMBERS` no `.env`. Log do bridge:
    `docker compose exec openclaw-vibestack tail -f /var/log/whatsapp-bridge.log`.
-
-⚠️ A licença do Evolution Go usa **heartbeats** (precisa de internet de saída); não é 100% offline.
 
 ---
 
@@ -898,16 +866,14 @@ Pronto — `atlascloud` aparece em `openclaw mcp list` (e no Hermes). Por que AP
 ├── Dockerfile               # node:24 + openclaw + ollama + meta-ads CLI + middleware + hermes
 ├── entrypoint.sh            # sobe backend(s) local(is) instalado(s) + openclaw mcp set + hermes gateway/dashboard + exec CMD
 ├── scripts/                 # start-ollama / start-lmstudio / models-status (boot + uso manual)
-├── docker-compose.yml       # openclaw-vibestack + evolution-go + postgres (env, volumes, portas)
+├── docker-compose.yml       # openclaw-vibestack + gowa (env, volumes, portas)
 ├── middleware/
 │   ├── meta_ads_cli_mcp.py        # MCP — 70 tools Meta Ads (CLI + Graph API)
 │   ├── media_editor_mcp.py        # MCP — ffmpeg + Backblaze B2
 │   ├── higgsfield_cli_mcp.py      # MCP — Higgsfield CLI (geração imagem/vídeo, soul-id)
-│   ├── whatsapp_evolution_mcp.py  # MCP — envio WhatsApp via Evolution Go (whatsmeow)
-│   ├── whatsapp_bridge.py         # bridge inbound: webhook Evolution -> Hermes -> resposta
+│   ├── whatsapp_gowa_mcp.py       # MCP — envio WhatsApp via GOWA (whatsmeow)
+│   ├── whatsapp_bridge.py         # bridge inbound: webhook GOWA -> Hermes -> resposta
 │   └── requirements.txt
-├── postgres/
-│   └── init-evolution-dbs.sql     # cria evogo_auth / evogo_users no 1o boot
 ├── .env.example
 └── README.md
 ```
@@ -920,11 +886,11 @@ O `entrypoint.sh` registra estes MCP servers no boot (no OpenClaw via `openclaw 
 |--------------|----------------------------------------------------------------------|-------------------------------------------------------------------------|-------------------------------------------|--------------|
 | `meta-ads`   | 70 tools de Meta Ads (campanhas, ad sets, ads, creatives, insights, catálogos, pixels, custom audiences, lookalikes, duplicação) | middleware Python (`meta_ads_cli_mcp.py`) envelopando a CLI oficial `meta` | `META_ACCESS_TOKEN` (+ `META_AD_ACCOUNT_ID`) | [Tools do MCP Meta Ads](#tools-do-mcp-meta-ads) |
 | `media-editor` | Edição de mídia com **ffmpeg** (cortar, redimensionar, overlay, trilha, validar p/ Meta) + **Backblaze B2** como storage de seeds/derivações | middleware Python (`media_editor_mcp.py`) + `ffmpeg` na imagem            | `B2_KEY_ID` / `B2_APP_KEY` / `B2_BUCKET` / `B2_ENDPOINT_URL` | [Tools do MCP media-editor](#tools-do-mcp-media-editor-ffmpeg--backblaze-b2) |
-| `whatsapp`   | Enviar texto/mídia e gerir a instância (QR/status) via Evolution Go  | middleware Python (`whatsapp_evolution_mcp.py`)                          | `EVOLUTION_API_KEY` / `EVOLUTION_INSTANCE_TOKEN` | [WhatsApp (Evolution Go)](#whatsapp-evolution-go) |
+| `whatsapp`   | Enviar texto/mídia e gerir a instância (QR/status) via GOWA          | middleware Python (`whatsapp_gowa_mcp.py`)                              | `GOWA_BASIC_AUTH` / `GOWA_DEVICE_ID`      | [WhatsApp (GOWA)](#whatsapp-gowa) |
 | `higgsfield` | Gerar **imagem/vídeo** e treinar **soul-id** (rosto fiel)            | middleware Python (`higgsfield_cli_mcp.py`) envelopando o CLI `@higgsfield/cli` (instalado na imagem) | login no navegador 1x (token em volume `${HIGGSFIELD_DATA_DIR}`) | [Geração de mídia](#geração-de-mídia--hub-de-modelos) |
 | `atlascloud` | Hub de **300+ modelos** (imagem/vídeo/LLM)                           | MCP server **oficial** `atlascloud-mcp` (npm, instalado na imagem)      | `ATLASCLOUD_API_KEY`                      | [Geração de mídia](#geração-de-mídia--hub-de-modelos) |
 
-> Inbound de WhatsApp (receber mensagens, inclusive imagem/áudio) é o `whatsapp_bridge.py` — não é um MCP, é um serviço que o entrypoint sobe. Veja [WhatsApp (Evolution Go)](#whatsapp-evolution-go).
+> Inbound de WhatsApp (receber mensagens, inclusive imagem/áudio) é o `whatsapp_bridge.py` — não é um MCP, é um serviço que o entrypoint sobe. Veja [WhatsApp (GOWA)](#whatsapp-gowa).
 
 ### Componentes "bakeados" na imagem
 
@@ -934,7 +900,7 @@ Além dos MCP servers acima, o `Dockerfile` instala na imagem (tudo num containe
 - **Hermes Agent** (NousResearch) — alternativa ao OpenClaw (API OpenAI-compatible 8642 + dashboard 9119), com os mesmos MCP servers. Veja [Hermes Agent](#hermes-agent-alternativa-ao-openclaw).
 - **Ollama** (porta 11434) — roda modelos locais (`llama3.2`, `qwen2.5`, etc.) sem API paga. **Não é MCP**: é o provedor de modelo que os agentes podem usar. Veja [Baixar modelos no Ollama](#baixar-modelos-no-ollama).
 - **CLIs/SDKs**: `meta` (Meta Ads, PyPI), `@higgsfield/cli`, `atlascloud-mcp`, `ffmpeg`, `boto3` (B2), e os binários de exemplo `gog`/`goplaces`/`wacli`.
-- **Evolution Go** + **Postgres** — serviços irmãos no compose (não na mesma imagem) que dão o canal de WhatsApp.
+- **GOWA** — serviço irmão no compose (não na mesma imagem) que dá o canal de WhatsApp.
 
 Pra adicionar os seus, veja [Adicionar uma CLI nova à imagem](#adicionar-uma-cli-nova-à-imagem) e [Adicionar um MCP server novo](#adicionar-um-mcp-server-novo).
 
@@ -1061,7 +1027,7 @@ Sobrevivem a `docker compose down`/rebuild (cada um é um volume):
 - `${OLLAMA_DATA_DIR}` (default `/root/.ollama`) → `/var/lib/ollama` (modelos baixados).
 - `${HERMES_DATA_DIR}` (default `/root/.hermes`) → `/root/.hermes` (config.yaml, sessões, memórias).
 - `${HIGGSFIELD_DATA_DIR}` (default `/root/.higgsfield`) → `/root/.higgsfield` (token do `higgsfield auth login`).
-- `${EVOLUTION_DATA_DIR}` / `${POSTGRES_DATA_DIR}` → dados/sessão do WhatsApp.
+- `${GOWA_DATA_DIR}` → dados/sessão do WhatsApp.
 
 **Onde os agentes devem gravar arquivos.** Só persiste o que está **dentro** desses volumes. Escrita em `/tmp`, `/app`, `/root` (fora de `.openclaw`/`.hermes`) ou no diretório atual é **efêmera** e some no `down`/rebuild — essa é a causa de "os arquivos sumiram". Diretórios persistentes canônicos para os agentes:
 
@@ -1179,5 +1145,5 @@ Já tem proteção: `--no-color --no-input` + normalização de `"No results."` 
 - Hermes Agent (NousResearch): https://github.com/NousResearch/hermes-agent
 - Higgsfield CLI: https://higgsfield.ai/cli
 - AtlasCloud (CLI/MCP, hub de modelos): https://www.atlascloud.ai/cli
-- Evolution Go (WhatsApp API): https://github.com/EvolutionAPI/evolution-go
+- GOWA (WhatsApp API): https://github.com/aldinokemal/go-whatsapp-web-multidevice
 - Backblaze B2 (storage S3-compatible): https://www.backblaze.com/cloud-storage

@@ -268,15 +268,15 @@ socat \
 HERMES_WEB_SOCAT_PID=$!
 echo "[entrypoint] socat bridge 0.0.0.0:$HERMES_WEB_PUBLIC_PORT -> 127.0.0.1:$HERMES_WEB_INTERNAL_PORT (pid=$HERMES_WEB_SOCAT_PID)"
 
-# --- Bridge inbound do WhatsApp (Evolution Go webhook -> Hermes -> resposta) ---
+# --- Bridge inbound do WhatsApp (GOWA webhook -> Hermes -> resposta) ---
 # Fecha o "canal": mensagens recebidas no WhatsApp viram prompts pro agente
-# Hermes (api_server na 8642), e a resposta volta pelo /send/text do Evolution.
-# Escuta em 0.0.0.0:WA_BRIDGE_PORT (so' rede interna do compose); o evolution-go
-# aponta o WEBHOOK_URL pra http://openclaw-vibestack:<porta>/webhook.
+# Hermes (api_server na 8642), e a resposta volta pelo /send/message do GOWA.
+# Escuta em 0.0.0.0:WA_BRIDGE_PORT (so' rede interna do compose); o gowa
+# aponta o WHATSAPP_WEBHOOK pra http://openclaw-vibestack:<porta>/webhook automaticamente.
 # O agente que responde e' escolhido por WA_BRIDGE_AGENT (hermes|openclaw):
 #  - hermes  -> precisa de API_SERVER_KEY (HTTP no api_server).
 #  - openclaw-> usa a CLI `openclaw agent` (nao precisa de key).
-# Sobe se houver como responder no WhatsApp (token da instancia) e, no modo
+# Sobe se houver como responder no WhatsApp (GOWA_BASE_URL configurado) e, no modo
 # hermes, a key do api_server. No modo openclaw basta o token da instancia.
 WA_BRIDGE_AGENT="${WA_BRIDGE_AGENT:-hermes}"
 if [ "$WA_BRIDGE_AGENT" = "openclaw" ] || [ -n "${API_SERVER_KEY:-}" ]; then
