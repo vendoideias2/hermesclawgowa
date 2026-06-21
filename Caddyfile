@@ -1,0 +1,11 @@
+hermes.vendoideias.com {
+    reverse_proxy openclaw-vibestack:9119
+}
+
+open.vendoideias.com {
+    reverse_proxy openclaw-vibestack:18789
+}
+
+gowa.vendoideias.com {
+    reverse_proxy gowa:3000
+}
