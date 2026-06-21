@@ -10,5 +10,7 @@ open.vendoideias.com {
 
 gowa.vendoideias.com {
     tls internal
-    reverse_proxy gowa:3000
+    reverse_proxy gowa:3000 {
+        header_up -Cookie
+    }
 }
