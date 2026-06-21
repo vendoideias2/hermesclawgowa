@@ -49,7 +49,7 @@ services:
       - GOWA_DEVICE_ID=${GOWA_DEVICE_ID:-}
       # Auto-aprovacao de comandos (canal headless trava sem isso -> timeout). off|smart|manual.
       - HERMES_APPROVALS_MODE=${HERMES_APPROVALS_MODE:-off}
-      # Bridge inbound do WhatsApp (webhook do Evolution -> agente -> resposta).
+      # Bridge inbound do WhatsApp (webhook do GOWA -> agente -> resposta).
       # WA_BRIDGE_AGENT: quem responde o canal — 'hermes' (api_server) ou 'openclaw'
       # (CLI `openclaw agent`). WA_BRIDGE_ALLOWED_NUMBERS: CSV de numeros que podem
       # falar com o agente (vazio = qualquer um). Recomendado preencher.
