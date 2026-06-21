@@ -4,10 +4,10 @@ services:
   # Escuta nas portas 80/443 do host e faz o direcionamento.
   # ============================================================
   traefik:
-    image: traefik:v3.0
+    image: traefik:latest
     restart: unless-stopped
     environment:
-      - DOCKER_API_VERSION=1.40
+      - DOCKER_API_VERSION=1.46
     command:
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
