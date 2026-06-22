@@ -114,6 +114,8 @@ services:
       - "--port"
       - "${OPENCLAW_GATEWAY_PORT:-18789}"
       - "--allow-unconfigured"
+      - "--auth"
+      - "none"
 
   # ============================================================
   # Banco de dados PostgreSQL para persistência do GOWA.
