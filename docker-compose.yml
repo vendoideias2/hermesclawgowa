@@ -1,22 +1,4 @@
 services:
-  # ============================================================
-  # Proxy Reverso e Roteador Web (Traefik) com SSL Automático.
-  # Escuta nas portas 80/443 do host e faz o direcionamento.
-  # ============================================================
-  caddy:
-    image: caddy:latest
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - caddy_data:/data
-      - caddy_config:/config
-    networks:
-      - default
-      - network_public
-
   openclaw-vibestack:
     image: ${OPENCLAW_IMAGE:-vibestack-openclaw:latest}
     build:
@@ -94,18 +76,17 @@ services:
       # Persistente pra que a sessao sobreviva a restart/rebuild (aluno loga 1x).
       - ${HIGGSFIELD_DATA_DIR:-/root/.higgsfield}:/root/.higgsfield
     ports:
-      - "${OPENCLAW_GATEWAY_PORT:-18789}:18789"
+      - "127.0.0.1:${OPENCLAW_GATEWAY_PORT:-18789}:18789"
       # Porta do Ollama acessivel diretamente no host
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
       # LM Studio — API OpenAI-compat (se ativado)
-      - "1234:1234"
+      - "127.0.0.1:1234:1234"
       # Hermes — API OpenAI-compatible (porta separada, coexiste com o OpenClaw)
-      - "${HERMES_API_PORT:-8642}:8642"
+      - "127.0.0.1:${HERMES_API_PORT:-8642}:8642"
       # Hermes — dashboard web (pagina de gestao/chat)
-      - "${HERMES_WEB_PORT:-9119}:9119"
+      - "127.0.0.1:${HERMES_WEB_PORT:-9119}:9119"
     networks:
       - default
-      - network_public
     command:
       - "openclaw"
       - "gateway"
@@ -160,16 +141,9 @@ services:
       - HTTP_PROXY=${GOWA_HTTP_PROXY:-}
       - HTTPS_PROXY=${GOWA_HTTPS_PROXY:-}
     ports:
-      - "${GOWA_PORT:-3000}:3000"
+      - "127.0.0.1:${GOWA_PORT:-3000}:3000"
     networks:
       - default
-      - network_public
-
-volumes:
-  caddy_data:
-  caddy_config:
 
 networks:
   default:
-  network_public:
-    external: true
