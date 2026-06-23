@@ -563,20 +563,7 @@ if { [ "$FRESH_ENV" = "1" ] || [ "$RECONFIG" = "1" ]; } && [ "$INTERACTIVE" = "1
     info 'media-editor pulado — preencha os B2_* no .env depois se precisar.'
   fi
 
-  # Domínios para as stacks com acesso externo
-  cur_h="$(get_env_var .env DOMAIN_HERMES)"; [ -z "$cur_h" ] && cur_h="https://hermes.vendoideias.com"
-  cur_o="$(get_env_var .env DOMAIN_OPENCLAW)"; [ -z "$cur_o" ] && cur_o="https://open.vendoideias.com"
-  cur_g="$(get_env_var .env DOMAIN_GOWA)"; [ -z "$cur_g" ] && cur_g="https://gowa.vendoideias.com"
-
-  domain_h="$(ask 'Domínio para o Hermes (ex: https://hermes.vendoideias.com)' "$cur_h")"
-  domain_o="$(ask 'Domínio para o OpenClaw (ex: https://open.vendoideias.com)' "$cur_o")"
-  domain_g="$(ask 'Domínio para o GOWA (ex: https://gowa.vendoideias.com)' "$cur_g")"
-
-  [ -n "$domain_h" ] && set_env_var .env DOMAIN_HERMES "$domain_h"
-  [ -n "$domain_o" ] && set_env_var .env DOMAIN_OPENCLAW "$domain_o"
-  [ -n "$domain_g" ] && set_env_var .env DOMAIN_GOWA "$domain_g"
-  
-  info "Domínios configurados: $domain_h, $domain_o, $domain_g"
+  # Domínios desativados (acesso restrito via localhost e túnel SSH)
 
   # Porta do GOWA
   gowa_port="$(ask 'Porta do serviço GOWA' "$(get_env_var .env GOWA_PORT)")"
@@ -657,12 +644,9 @@ docker compose build
 # --- 9. proximos passos (NAO sobe a stack) ---------------------------------
 step "Instalacao concluida"
 
-DOM_OPEN="$(get_env_var .env DOMAIN_OPENCLAW)"
-[ -z "$DOM_OPEN" ] && DOM_OPEN="http://127.0.0.1:18789"
-DOM_HERMES="$(get_env_var .env DOMAIN_HERMES)"
-[ -z "$DOM_HERMES" ] && DOM_HERMES="http://127.0.0.1:9119"
-DOM_GOWA="$(get_env_var .env DOMAIN_GOWA)"
-[ -z "$DOM_GOWA" ] && DOM_GOWA="http://127.0.0.1:3000"
+DOM_OPEN="http://127.0.0.1:18789"
+DOM_HERMES="http://127.0.0.1:9119"
+DOM_GOWA="http://127.0.0.1:3000"
 
 cat <<EOF
 
@@ -678,16 +662,16 @@ Proximos passos (manuais):
        docker compose up -d --force-recreate openclaw-vibestack
 
   3) Acesse a UI do OpenClaw:
-       - Link Direto:          $DOM_OPEN
-       - VPS (SSH tunnel se local): ssh -N -L 18789:127.0.0.1:18789 root@SEU_VPS_IP
+       - Localhost:            $DOM_OPEN
+       - VPS (SSH tunnel):     ssh -N -L 18789:127.0.0.1:18789 root@SEU_VPS_IP
 
   4) Acesse o Dashboard do Hermes:
-       - Link Direto:          $DOM_HERMES
-       - VPS (SSH tunnel se local): ssh -N -L 9119:127.0.0.1:9119 root@SEU_VPS_IP
+       - Localhost:            $DOM_HERMES
+       - VPS (SSH tunnel):     ssh -N -L 9119:127.0.0.1:9119 root@SEU_VPS_IP
 
   5) Acesse o GOWA para pareamento do WhatsApp (QR Code):
-       - Link Direto:          $DOM_GOWA
-       - VPS (SSH tunnel se local): ssh -N -L 3000:127.0.0.1:3000 root@SEU_VPS_IP
+       - Localhost:            $DOM_GOWA
+       - VPS (SSH tunnel):     ssh -N -L 3000:127.0.0.1:3000 root@SEU_VPS_IP
 
   6) Pareie o WhatsApp no GOWA acessando o link do passo 5 e escaneie o QR Code.
      Com a sessão pareada no GOWA, o agente já poderá responder e enviar mensagens pelo WhatsApp!
