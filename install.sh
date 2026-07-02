@@ -208,6 +208,8 @@ if ask_yesno "Deseja instalar as skills recomendadas de IA agora?" "y"; then
   install_sk "codesstar/hermes-skill-atlas"
   install_sk "prompt-security/clawsec"
   install_sk "ChrisLamDev/hermes-core-skills"
+  install_sk "RobinBeraud/hermes-skills"
+  install_sk "izillionways/academic-research-skills-hermes"
   info "Skills instaladas com sucesso!"
 fi
 

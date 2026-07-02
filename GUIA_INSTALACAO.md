@@ -48,7 +48,7 @@ chmod +x install.sh
 *   ✅ **Firewall UFW:** Configura o firewall nativo do Linux abrindo apenas as portas essenciais do projeto (`22`, `80`, `443`, `3000`, `18789`, `9119`, `8642`).
 *   ✅ **Configuração Interativa do `.env`:** Solicita dados como domínio, chaves de API (Meta Ads, Backblaze B2, WAHA API Key) e gera chaves de segurança randômicas robustas automaticamente.
 *   ✅ **Modelos locais do Ollama:** Inicia o download local no host dos modelos modernos (`phi4-mini` de 3.8B e `gemma4:e2b` de 2B).
-*   ✅ **Skills Automáticas:** Cria o script de gerenciamento e instala automaticamente as principais skills do catálogo (`hermes-skill-atlas`, `clawsec` e `hermes-core-skills`) na pasta de dados.
+*   ✅ **Skills Automáticas:** Cria o script de gerenciamento e instala automaticamente as principais skills do catálogo (`hermes-skill-atlas`, `clawsec`, `hermes-core-skills`, `hermes-skills` (de marketing/SEO) e `academic-research-skills-hermes`) na pasta de dados.
 
 ---
 
