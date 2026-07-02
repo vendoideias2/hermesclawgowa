@@ -1,134 +1,140 @@
-# 🗺️ GUIA DEFINITIVO — Instalação da Stack HermesClawGowa com WAHA, Traefik e HTTPS
+# 🗺️ GUIA DEFINITIVO — Instalação Completa da Stack HermesClawGowa na VPS
+## (WAHA/GOWA, Traefik, HTTPS, Compiladores Nativos, Modelos e Skills)
 
-Este é o roteiro de instalação definitivo para configurar a sua VPS com Swap de 12GB, compiladores nativos, e rodar a stack **HermesClawGowa** utilizando o **WAHA** (WhatsApp HTTP API) em substituição ao GOWA. Toda a comunicação externa dos painéis web será protegida com HTTPS via **Traefik** nos domínios **open.vendoideias.com** e **hermes.vendoideias.com**.
+Este guia cobre a preparação completa do sistema e da infraestrutura da sua VPS (8GB de RAM), a instalação dos compiladores nativos, a configuração de swap de 12GB, o provisionamento de LLMs no Ollama e a orquestração do sistema de agentes com o catálogo de skills do Hermes/OpenClaw.
 
 ---
 
-## 📋 VISÃO GERAL — O Que Cada Fase Faz
+## 📋 Arquitetura de Rede e Roteamento (Traefik + HTTPS)
 
-| Fase | O que faz | Onde roda |
+Toda a comunicação externa da VPS será criptografada automaticamente (Let's Encrypt SSL) através do **Traefik** como proxy reverso, encaminhando para os seguintes subdomínios:
+
+*   **`open.vendoideias.com`** ➜ Roteia para o OpenClaw UI (Porta `18789`)
+*   **`hermes.vendoideias.com`** ➜ Roteia para o Hermes Dashboard (Porta `9119`)
+
+---
+
+## 🚀 PASSO 1: Apontamento de DNS
+
+Antes de iniciar na VPS, acesse o painel do seu registrador de domínio (`vendoideias.com`) e adicione dois registros do **Tipo A** apontando para o IP público da sua VPS:
+
+| Nome do Host | Tipo | Destino (IP) |
 | :--- | :--- | :--- |
-| **1** | Aponta registros DNS dos subdomínios para o IP da VPS | Provedor de Domínio |
-| **2** | Executa o instalador interativo (Swap, Ferramentas, Docker, Modelos e Configs) | VPS |
-| **3** | Inicia a stack com Docker Compose | VPS |
-| **4** | Pareia o WhatsApp no console web do WAHA | Navegador local |
-| **5** | Gerenciamento e testes do sistema | VPS / Navegador |
+| `open.vendoideias.com` | A | `IP_DA_SUA_VPS` |
+| `hermes.vendoideias.com` | A | `IP_DA_SUA_VPS` |
 
 ---
 
-## 🚀 FASE 1: Apontamento de DNS
+## 🚀 PASSO 2: Linha de Comando de Instalação Unificada (One-Liner)
 
-No painel de gerenciamento do seu domínio (`vendoideias.com`), crie dois registros do **Tipo A** apontando para o IP público do seu servidor VPS:
+Conecte-se na sua VPS via SSH e cole o comando completo abaixo. Ele realizará a preparação do sistema, instalação de compiladores e inicialização interativa da stack:
 
-*   `open.vendoideias.com` ➜ `IP_DA_SUA_VPS`
-*   `hermes.vendoideias.com` ➜ `IP_DA_SUA_VPS`
-
----
-
-## 🚀 FASE 2: Execução do Instalador na VPS
-
-Conecte-se na sua VPS via SSH:
 ```bash
-ssh root@IP_DA_SUA_VPS
+cd /root && git clone https://github.com/vendoideias2/hermesclawgowa.git && cd hermesclawgowa && chmod +x install.sh && ./install.sh
 ```
 
-Clone o repositório, dê permissão de execução e rode o novo instalador automático:
-```bash
-cd /root
-git clone https://github.com/vendoideias2/hermesclawgowa.git
-cd hermesclawgowa
-chmod +x install.sh
-./install.sh
-```
+---
 
-### ⚙️ O que o `install.sh` faz de forma nativa e integrada:
-*   ✅ **Ferramentas do Host:** Pergunta se deseja instalar os compiladores e interpretadores mais recentes do **Node.js LTS**, **Python 3 (+ venv/pip)** e **Go Compiler** diretamente no host da VPS.
-*   ✅ **Swap de 12GB:** Cria e configura de forma fixa um arquivo de swapfile de 12GB e otimiza a swappiness do kernel Linux (essencial para rodar LLMs em 8GB de RAM).
-*   ✅ **Docker e Compose:** Garante a instalação do Docker Engine e do plugin docker-compose-plugin v2.
-*   ✅ **Firewall UFW:** Configura o firewall nativo do Linux abrindo apenas as portas essenciais do projeto (`22`, `80`, `443`, `3000`, `18789`, `9119`, `8642`).
-*   ✅ **Configuração Interativa do `.env`:** Solicita dados como domínio, chaves de API (Meta Ads, Backblaze B2, WAHA API Key) e gera chaves de segurança randômicas robustas automaticamente.
-*   ✅ **Modelos locais do Ollama:** Inicia o download local no host dos modelos modernos (`phi4-mini` de 3.8B e `gemma4:e2b` de 2B).
-*   ✅ **Skills Automáticas:** Cria o script de gerenciamento e instala automaticamente as principais skills do catálogo (`hermes-skill-atlas`, `clawsec`, `hermes-core-skills`, `hermes-skills` (de marketing/SEO) e `academic-research-skills-hermes`) na pasta de dados.
+## 🚀 PASSO 3: O que o script `install.sh` executa de forma sequencial
+
+### 3.1 Instalação de Compiladores e Ferramentas Nativas (Host)
+O instalador instalará diretamente no host da VPS todas as dependências necessárias para desenvolvimento, deploy e execução de scripts de skills:
+*   **Node.js LTS** (via repositório NodeSource oficial)
+*   **Go Compiler** (instalado em `/usr/local/go` e configurado no PATH)
+*   **Python 3, venv, pip, python3-dev** (para isolamento e execução de skills de IA)
+*   **Ferramentas Úteis:** `build-essential`, `curl`, `wget`, `jq`, `unzip`, `ffmpeg` (processamento de áudio/vídeo).
+
+### 3.2 Partição Swap de 12GB
+Para evitar travamentos de falta de memória (OOM) ao carregar os modelos locais em uma VPS de 8GB de RAM, o script cria e ativa um arquivo `/swapfile` fixo de **12GB**, otimizando a swappiness do kernel Linux para `10`.
+
+### 3.3 Docker Engine & Compose v2
+Garante o Docker configurado para inicialização automática no boot do sistema e o plugin `docker-compose-plugin` v2 atualizado.
+
+### 3.4 Firewall UFW (Segurança Nativa)
+Configura e ativa o firewall nativo do Linux permitindo o tráfego apenas nas portas públicas do projeto:
+*   `22/tcp` (SSH)
+*   `80/tcp` & `443/tcp` (Traefik HTTP/HTTPS Let's Encrypt)
+*   `3000/tcp` (WhatsApp API - WAHA/GOWA)
+*   `18789/tcp` (OpenClaw UI)
+*   `8642/tcp` (Hermes API Gateway)
+*   `9119/tcp` (Hermes Dashboard)
+
+### 3.5 Escolha Interativa da API do WhatsApp
+Durante a execução, você escolherá de forma interativa qual API deseja utilizar:
+*   **[1] WAHA (Recomendado):** WhatsApp HTTP API leve, sem banco de dados local Postgres (economiza RAM), persistindo sessões em arquivo JSON em `./waha/sessions`.
+*   **[2] GOWA (Legado):** Go WhatsApp Multidevice tradicional, reativando os containers extras de banco de dados `postgres:15-alpine` para persistência das credenciais.
+
+O script copiará automaticamente o template correto (`docker-compose.waha.yml` ou `docker-compose.gowa.yml`) para o arquivo final `docker-compose.yml`.
+
+### 3.6 Instalação Automática do Catálogo de Skills
+Clona e ativa as melhores skills do ecossistema do Hermes e OpenClaw diretamente no diretório de dados persistentes do agente:
+*   `clawsec` (Segurança, integridade de alma SOUL.md e drift detection)
+*   `hermes-core-skills` (25 habilidades utilitárias de desenvolvimento e análise)
+*   `hermes-skills` (Automação de SEO, WordPress e Marketing)
+*   `academic-research-skills-hermes` (Escrita científica e pesquisas bibliográficas)
+*   `hermes-skill-atlas` (Gerenciamento geográfico)
 
 ---
 
-## 🚀 FASE 3: Inicialização da Stack
+## 🚀 PASSO 4: Download de Modelos locais no Ollama (Host)
 
-Após o build das imagens Docker do OpenClaw/Hermes terminar no script de instalação, suba os serviços em segundo plano:
+O Ollama roda diretamente no host do servidor para alta performance. Instale-o e puxe os modelos recomendados para a VPS de 8GB (modelos leves e extremamente rápidos):
 
+```bash
+# Instala o Ollama no host
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Configura o Ollama para aceitar conexões vindas do container Docker
+mkdir -p /etc/systemd/system/ollama.service.d
+echo -e "[Service]\nEnvironment=\"OLLAMA_HOST=0.0.0.0\"" > /etc/systemd/system/ollama.service.d/host.conf
+systemctl daemon-reload
+systemctl restart ollama
+
+# Baixa os modelos modernos otimizados para VPS de 8GB
+ollama pull phi4:mini
+ollama pull gemma4:e3b
+```
+
+---
+
+## 🚀 PASSO 5: Inicialização e Pareamento do WhatsApp
+
+### 5.1 Subir a Stack
+Inicie os containers configurados pelo script:
 ```bash
 docker compose up -d
 ```
 
-Verifique se todos os serviços estão saudáveis:
+### 5.2 Parear o WhatsApp
+Como a API do WhatsApp roda de forma privada, faça um túnel local a partir da sua máquina física para o pareamento inicial:
 ```bash
-docker compose ps
-```
-
-### 📊 Serviços Rodando:
-*   `hermesclawgowa-traefik-1` ➜ Proxy reverso HTTPS nas portas `80` e `443`.
-*   `hermesclawgowa-waha-1` ➜ WhatsApp HTTP API na porta `3000`.
-*   `hermesclawgowa-openclaw-vibestack-1` ➜ Ambiente integrado do OpenClaw (API + UI) e Hermes Agent.
-
----
-
-## 🚀 FASE 4: Pareamento do WhatsApp via WAHA
-
-O serviço do WAHA roda internamente por motivos de segurança. Para acessá-lo e parear o seu celular, faça um túnel SSH do seu computador local:
-
-No terminal da sua máquina física (computador local):
-```bash
+# Execute este comando no terminal do seu COMPUTADOR LOCAL:
 ssh -N -L 3000:127.0.0.1:3000 root@IP_DA_SUA_VPS
 ```
 
-No seu navegador local, abra:
+Agora, abra no seu navegador local:
 ➜ **`http://localhost:3000`**
 
-1.  Acesse o dashboard do **WAHA**.
-2.  Inicie a sessão `default` (caso ainda não esteja iniciada).
-3.  Visualize o **QR Code** gerado no painel e escaneie com o aplicativo do WhatsApp do seu celular.
-4.  O status mudará para `WORKING` quando o pareamento for concluído.
+*   Se selecionou **WAHA**: Clique em `sessions` -> Inicie a sessão `default` -> Escaneie o QR Code no seu celular.
+*   Se selecionou **GOWA**: Escaneie o QR Code exibido diretamente no painel básico do GOWA.
 
 ---
 
-## 🚀 FASE 5: Acesso aos Serviços e Testes
+## 🚀 PASSO 6: Acesso e Teste de Agentes e MCPs
 
-Agora, você já pode acessar as suas interfaces públicas criptografadas com certificado SSL emitido automaticamente pelo Traefik:
+Acesse as URLs seguras (HTTPS) para gerenciar seus agentes:
 
-| Painel / Interface | Endereço Web | Descrição |
-| :--- | :--- | :--- |
-| **OpenClaw UI** | `https://open.vendoideias.com` | Painel web interativo de IA |
-| **Hermes Dashboard** | `https://hermes.vendoideias.com` | Chat e gestão do Hermes Agent |
+*   **Interface OpenClaw:** `https://open.vendoideias.com` (use o `OPENCLAW_GATEWAY_TOKEN` gerado no `.env` para logar).
+*   **Hermes Dashboard:** `https://hermes.vendoideias.com` (chat interativo direto).
 
-### 5.1 Verificar as Skills e MCPs Ativos
-Entre no container do OpenClaw e liste os MCPs integrados:
+### 🛠️ Comandos de Diagnóstico e Controle
 ```bash
+# Listar MCPs e Ferramentas ativos no OpenClaw
 docker compose exec openclaw-vibestack openclaw mcp list
-```
-*Saída esperada:* `meta-ads`, `media-editor`, `whatsapp`, `higgsfield`, `atlascloud`.
 
-### 5.2 Exemplos de Prompt para Testar
-Envie mensagens pelo WhatsApp conectado ou pelas interfaces web:
-*   *"Envie uma mensagem de WhatsApp para 5517999999999 dizendo Olá!"* (Chama o MCP do WhatsApp)
-*   *"/reset"* (Reinicia a sessão de conversação e memória local do agente)
-
----
-
-## 🔧 COMANDOS ÚTEIS DE GERENCIAMENTO
-
-```bash
-# Ver logs do Traefik (emissão de certificados SSL)
-docker compose logs -f traefik
-
-# Ver logs do bridge do WhatsApp e do agente
+# Acompanhar logs em tempo real
 docker compose logs -f openclaw-vibestack
 
 # Reiniciar toda a infraestrutura
 docker compose restart
-
-# Parar os containers
-docker compose down
-
-# Ver credenciais geradas automaticamente (.env.secrets)
-cat .env.secrets
 ```
