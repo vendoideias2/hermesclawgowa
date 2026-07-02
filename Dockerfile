@@ -4,6 +4,7 @@ FROM node:24-bookworm
 ARG OPENCLAW_REPO=https://github.com/openclaw/openclaw.git
 ARG OPENCLAW_REF=main
 ENV HOME=/root
+ENV NODE_OPTIONS="--max-old-space-size=3072"
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git ca-certificates curl socat zstd python3 python3-pip ffmpeg ripgrep \
