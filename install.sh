@@ -2,6 +2,9 @@
 # Instalador otimizado do hermesclawgowa com suporte a WAHA, ferramentas nativas e skills.
 set -euo pipefail
 
+# Garante que o script execute a partir do diretório onde está localizado
+cd "$(dirname "$0")"
+
 # Cores
 C_GREEN="\033[32m"
 C_YELLOW="\033[33m"
@@ -110,24 +113,6 @@ else
   fi
 fi
 
-# 5. Configurar UFW
-step "Configurando UFW"
-if command -v ufw >/dev/null 2>&1; then
-  if ask_yesno "Deseja abrir as portas necessárias no UFW (22, 80, 443, 3000, 18789, 9119, 8642)?" "y"; then
-    as_root ufw default deny incoming
-    as_root ufw default allow outgoing
-    as_root ufw allow 22/tcp comment 'SSH'
-    as_root ufw allow 80/tcp comment 'HTTP'
-    as_root ufw allow 443/tcp comment 'HTTPS'
-    as_root ufw allow 18789/tcp comment 'OpenClaw UI'
-    as_root ufw allow 3000/tcp comment 'WAHA API'
-    as_root ufw allow 8642/tcp comment 'Hermes API'
-    as_root ufw allow 9119/tcp comment 'Hermes Dashboard'
-    echo "y" | as_root ufw enable
-    info "UFW ativado e portas configuradas."
-  fi
-fi
-
 # 6. Criando Arquivos de Configuração (.env e .env.secrets)
 step "Configurando variáveis do .env"
 if [ ! -f .env ]; then
@@ -211,6 +196,24 @@ if ask_yesno "Deseja instalar as skills recomendadas de IA agora?" "y"; then
   install_sk "RobinBeraud/hermes-skills"
   install_sk "izillionways/academic-research-skills-hermes"
   info "Skills instaladas com sucesso!"
+fi
+
+# 11. Configurar UFW (por último, como solicitado)
+step "Configurando UFW"
+if command -v ufw >/dev/null 2>&1; then
+  if ask_yesno "Deseja abrir as portas necessárias no UFW (22, 80, 443, 3000, 18789, 9119, 8642)?" "y"; then
+    as_root ufw default deny incoming
+    as_root ufw default allow outgoing
+    as_root ufw allow 22/tcp comment 'SSH'
+    as_root ufw allow 80/tcp comment 'HTTP'
+    as_root ufw allow 443/tcp comment 'HTTPS'
+    as_root ufw allow 18789/tcp comment 'OpenClaw UI'
+    as_root ufw allow 3000/tcp comment 'WAHA API'
+    as_root ufw allow 8642/tcp comment 'Hermes API'
+    as_root ufw allow 9119/tcp comment 'Hermes Dashboard'
+    echo "y" | as_root ufw enable
+    info "UFW ativado e portas configuradas."
+  fi
 fi
 
 step "Instalação finalizada com sucesso!"
