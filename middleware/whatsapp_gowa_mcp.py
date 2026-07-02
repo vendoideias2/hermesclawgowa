@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""MCP server stdio que expõe o envio de WhatsApp via WAHA (WhatsApp HTTP API).
+"""MCP server stdio que expõe o envio de WhatsApp via WAHA ou GOWA (legado).
 
-WAHA (https://waha.devlike.pro/) roda como serviço no docker-compose (porta 3000).
-Este middleware é o cliente REST consumido pelos agentes (OpenClaw e Hermes).
+Suporta dinamicamente ambas as APIs de WhatsApp baseado na variável WHATSAPP_API.
 
 Env:
-  GOWA_BASE_URL     base da API (default http://waha:3000, DNS do compose)
+  WHATSAPP_API      'waha' (default) ou 'gowa'
+  GOWA_BASE_URL     base da API (default http://waha:3000 ou http://gowa:3000)
   WAHA_API_KEY      token/chave de API do WAHA (opcional)
   GOWA_DEVICE_ID    ID do dispositivo/sessão (default 'default')
 """
@@ -19,9 +19,10 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("whatsapp-waha")
+mcp = FastMCP("whatsapp-mcp")
 
-BASE_URL = os.environ.get("GOWA_BASE_URL", "http://waha:3000").rstrip("/")
+WHATSAPP_API = os.environ.get("WHATSAPP_API", "waha").strip().lower()
+BASE_URL = os.environ.get("GOWA_BASE_URL", "http://waha:3000" if WHATSAPP_API == "waha" else "http://gowa:3000").rstrip("/")
 API_KEY = os.environ.get("WAHA_API_KEY", "")
 DEVICE_ID = os.environ.get("GOWA_DEVICE_ID", "default")
 
@@ -37,18 +38,19 @@ def _normalize_phone(phone: str) -> str:
 
 
 def _headers() -> dict[str, str]:
-    """Retorna os headers padrão do WAHA."""
+    """Retorna os headers padrão de acordo com a API do WhatsApp."""
     hdrs = {}
-    if API_KEY:
-        hdrs["X-Api-Key"] = API_KEY
+    if WHATSAPP_API == "waha":
+        if API_KEY:
+            hdrs["X-Api-Key"] = API_KEY
     return hdrs
 
 
 def _req(method: str, path: str, body: dict | None = None) -> Any:
-    """Chama a API do WAHA via JSON."""
+    """Chama a API do WhatsApp via JSON."""
     url = f"{BASE_URL}{path}"
     headers = _headers()
-
+    
     data = json.dumps(body).encode("utf-8") if body is not None else None
     if data is not None:
         headers["Content-Type"] = "application/json"
@@ -74,51 +76,72 @@ def _req(method: str, path: str, body: dict | None = None) -> Any:
 
 @mcp.tool()
 def wa_create_instance(name: str | None = None, token: str | None = None, webhook: str | None = None) -> Any:
-    """Inicia a sessão de WhatsApp no WAHA.
+    """Inicia/Registra a sessão de WhatsApp.
     
     Equivalente a registrar/iniciar o login de um novo dispositivo.
     """
     dev_id = name or DEVICE_ID or "default"
-    body = {
-        "name": dev_id,
-        "config": {
-            "webhooks": [
-                {
-                    "url": webhook or "http://openclaw-vibestack:8765/webhook",
-                    "events": ["message"]
-                }
-            ]
+    if WHATSAPP_API == "gowa":
+        return _req("GET", f"/app/reconnect?device_id={dev_id}")
+    else:
+        body = {
+            "name": dev_id,
+            "config": {
+                "webhooks": [
+                    {
+                        "url": webhook or "http://openclaw-vibestack:8765/webhook",
+                        "events": ["message"]
+                    }
+                ]
+            }
         }
-    }
-    return _req("POST", "/api/sessions", body=body)
+        return _req("POST", "/api/sessions", body=body)
 
 
 @mcp.tool()
 def wa_connect() -> Any:
-    """Conecta ou reconecta a sessão do dispositivo WAHA."""
+    """Conecta ou reconecta a sessão do dispositivo do WhatsApp."""
     dev_id = DEVICE_ID or "default"
-    return _req("POST", f"/api/sessions/{dev_id}/start")
+    if WHATSAPP_API == "gowa":
+        return _req("GET", f"/app/reconnect?device_id={dev_id}")
+    else:
+        return _req("POST", f"/api/sessions/{dev_id}/start")
 
 
 @mcp.tool()
 def wa_get_qr() -> Any:
     """Retorna as instruções de pareamento do WhatsApp via QR Code."""
-    return {
-        "message": "Acesse a interface web do WAHA na porta 3000 para escanear o QR Code de pareamento.",
-        "url": "http://localhost:3000"
-    }
+    if WHATSAPP_API == "gowa":
+        return {
+            "message": f"Acesse a interface web do GOWA na porta {BASE_URL.split(':')[-1]} para pareamento do WhatsApp.",
+            "url": f"http://localhost:{BASE_URL.split(':')[-1]}"
+        }
+    else:
+        return {
+            "message": "Acesse a interface web do WAHA na porta 3000 para escanear o QR Code de pareamento.",
+            "url": "http://localhost:3000"
+        }
 
 
 @mcp.tool()
 def wa_instance_status() -> Any:
     """Retorna o status da conexão (connected / disconnected)."""
     dev_id = DEVICE_ID or "default"
-    res = _req("GET", f"/api/sessions/{dev_id}")
-    if isinstance(res, dict) and "status" in res:
-        status = res["status"]
-        st = "connected" if status == "WORKING" else "disconnected"
-        return {"status": st, "device_id": dev_id, "waha_status": status}
-    return {"status": "disconnected", "device_id": dev_id}
+    if WHATSAPP_API == "gowa":
+        res = _req("GET", "/app/devices")
+        if isinstance(res, list):
+            for d in res:
+                if str(d.get("name")) == dev_id:
+                    st = "connected" if d.get("connected") else "disconnected"
+                    return {"status": st, "device_id": dev_id, "gowa_device": d}
+        return {"status": "disconnected", "device_id": dev_id}
+    else:
+        res = _req("GET", f"/api/sessions/{dev_id}")
+        if isinstance(res, dict) and "status" in res:
+            status = res["status"]
+            st = "connected" if status == "WORKING" else "disconnected"
+            return {"status": st, "device_id": dev_id, "waha_status": status}
+        return {"status": "disconnected", "device_id": dev_id}
 
 
 # ============================================================
@@ -132,18 +155,27 @@ def wa_send_text(number: str, text: str) -> Any:
     number: número com código do país, só dígitos (ex: '5511999999999').
     text: conteúdo da mensagem.
     """
-    phone = _normalize_phone(number)
-    body = {
-        "chatId": phone,
-        "text": text,
-        "session": DEVICE_ID or "default"
-    }
-    return _req("POST", "/api/sendText", body=body)
+    if WHATSAPP_API == "gowa":
+        # Limpa o telefone para conter apenas dígitos antes de enviar
+        clean_num = "".join(filter(str.isdigit, number))
+        body = {
+            "phone": clean_num,
+            "message": text
+        }
+        return _req("POST", "/send/message", body=body)
+    else:
+        phone = _normalize_phone(number)
+        body = {
+            "chatId": phone,
+            "text": text,
+            "session": DEVICE_ID or "default"
+        }
+        return _req("POST", "/api/sendText", body=body)
 
 
 @mcp.tool()
 def wa_send_link(number: str, text: str) -> Any:
-    """Envia texto contendo link. O preview é gerado automaticamente pelo WAHA."""
+    """Envia texto contendo link. O preview é gerado automaticamente pelo WhatsApp."""
     return wa_send_text(number, text)
 
 
@@ -162,28 +194,38 @@ def wa_send_media(
     caption: legenda opcional (para imagem/vídeo).
     filename: nome do arquivo (opcional).
     """
-    phone = _normalize_phone(number)
-    is_url = media.startswith("http://") or media.startswith("https://")
-    
-    file_obj = {}
-    if is_url:
-        file_obj["url"] = media
-        file_obj["filename"] = filename or media.split("/")[-1].split("?")[0] or "file"
+    if WHATSAPP_API == "gowa":
+        # Envio de mídia no GOWA simplificado chamando envio de texto com o link
+        # para evitar a complexidade do multipart multipart/form-data
+        if media.startswith("http"):
+            text_link = f"{caption}\n\n{media}" if caption else media
+            return wa_send_text(number, text_link)
+        return {"error": "Base64 media no GOWA legado não é suportado via MCP. Use URLs públicas."}
+        
     else:
-        # Caso base64
-        if "," in media:
-            media = media.split(",", 1)[1]
-        file_obj["data"] = media
-        file_obj["filename"] = filename or f"file-{uuid.uuid4().hex[:8]}"
+        phone = _normalize_phone(number)
+        is_url = media.startswith("http://") or media.startswith("https://")
+        
+        file_obj = {}
+        if is_url:
+            file_obj["url"] = media
+            file_obj["filename"] = filename or media.split("/")[-1].split("?")[0] or "file"
+        else:
+            # Caso base64
+            if "," in media:
+                media = media.split(",", 1)[1]
+            file_obj["data"] = media
+            file_obj["filename"] = filename or f"file-{uuid.uuid4().hex[:8]}"
 
-    body = {
-        "chatId": phone,
-        "file": file_obj,
-        "caption": caption or "",
-        "session": DEVICE_ID or "default"
-    }
-    return _req("POST", "/api/sendFile", body=body)
+        body = {
+            "chatId": phone,
+            "file": file_obj,
+            "caption": caption or "",
+            "session": DEVICE_ID or "default"
+        }
+        return _req("POST", "/api/sendFile", body=body)
 
 
 if __name__ == "__main__":
+    import sys
     mcp.run()
