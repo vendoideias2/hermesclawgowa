@@ -163,24 +163,10 @@ set_var B2_BUCKET "$b2_bucket"
 b2_ep=$(ask "Backblaze B2 Endpoint URL" "$(get_var B2_ENDPOINT_URL)")
 set_var B2_ENDPOINT_URL "$b2_ep"
 
-# Escolha da API de WhatsApp
-whatsapp_api=$(ask "Escolha a API de WhatsApp: [1] WAHA (Recomendado) ou [2] GOWA (Legado)" "1")
-if [ "$whatsapp_api" = "2" ] || [ "$whatsapp_api" = "gowa" ]; then
-  set_var WHATSAPP_API "gowa"
-  set_var GOWA_BASE_URL "http://gowa:3000"
-  cp docker-compose.gowa.yml docker-compose.yml
-  info "API selecionada: GOWA (Legado). Copiado docker-compose.gowa.yml para docker-compose.yml."
-else
-  set_var WHATSAPP_API "waha"
-  set_var GOWA_BASE_URL "http://waha:3000"
-  cp docker-compose.waha.yml docker-compose.yml
-  info "API selecionada: WAHA (Recomendado). Copiado docker-compose.waha.yml para docker-compose.yml."
-fi
-
 waha_key=$(ask "Chave de API do WAHA (opcional)" "$(get_var WAHA_API_KEY)")
 set_var WAHA_API_KEY "$waha_key"
 
-waha_pass=$(ask "Senha do Dashboard do WAHA/GOWA (Basic Auth)" "$(get_var GOWA_BASIC_AUTH_PASS)")
+waha_pass=$(ask "Senha do Dashboard do WAHA (Basic Auth)" "$(get_var GOWA_BASIC_AUTH_PASS)")
 [ -z "$waha_pass" ] && waha_pass="admin:senha_forte_123"
 set_var GOWA_BASIC_AUTH_PASS "$waha_pass"
 
@@ -191,7 +177,7 @@ set_var WA_BRIDGE_ALLOWED_NUMBERS "$wa_num"
 step "Configurando Segredos"
 gen_secret() { python3 -c "import secrets; print(secrets.token_hex(32))"; }
 
-for key in OPENCLAW_GATEWAY_TOKEN GOG_KEYRING_PASSWORD HERMES_API_SERVER_KEY POSTGRES_PASSWORD; do
+for key in OPENCLAW_GATEWAY_TOKEN GOG_KEYRING_PASSWORD HERMES_API_SERVER_KEY; do
   val=$(get_var "$key")
   if [ -z "$val" ]; then
     set_var "$key" "$(gen_secret)"
@@ -200,7 +186,7 @@ done
 
 # 8. Criando pastas de dados
 step "Criando diretórios de dados persistentes"
-mkdir -p /root/.openclaw /root/.ollama /root/.hermes /root/.higgsfield /root/.lmstudio ./waha/sessions ./letsencrypt /root/.gowa-pg
+mkdir -p /root/.openclaw /root/.ollama /root/.hermes /root/.higgsfield /root/.lmstudio ./waha/sessions ./letsencrypt
 
 # 9. Build
 step "Construindo imagens Docker"

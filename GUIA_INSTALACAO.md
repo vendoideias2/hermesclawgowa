@@ -1,7 +1,9 @@
 # 🗺️ GUIA DEFINITIVO — Instalação Completa da Stack HermesClawGowa na VPS
-## (WAHA/GOWA, Traefik, HTTPS, Compiladores Nativos, Modelos e Skills)
+## (WAHA, Traefik, HTTPS, Compiladores Nativos, Modelos e Skills)
 
 Este guia cobre a preparação completa do sistema e da infraestrutura da sua VPS (8GB de RAM), a instalação dos compiladores nativos, a configuração de swap de 12GB, o provisionamento de LLMs no Ollama e a orquestração do sistema de agentes com o catálogo de skills do Hermes/OpenClaw.
+
+Esta instalação é focada 100% no **WAHA** (WhatsApp HTTP API), dispensando completamente bancos de dados extras e APIs legadas.
 
 ---
 
@@ -38,7 +40,7 @@ cd /root && git clone https://github.com/vendoideias2/hermesclawgowa.git && cd h
 ## 🚀 PASSO 3: O que o script `install.sh` executa de forma sequencial
 
 ### 3.1 Instalação de Compiladores e Ferramentas Nativas (Host)
-O instalador instalará diretamente no host da VPS todas as dependências necessárias para desenvolvimento, deploy e execução de scripts de skills:
+O instalador instalará diretamente no host da VPS todas as dependências necessárias para desenvolvimento, deploy e execução de skills de IA:
 *   **Node.js LTS** (via repositório NodeSource oficial)
 *   **Go Compiler** (instalado em `/usr/local/go` e configurado no PATH)
 *   **Python 3, venv, pip, python3-dev** (para isolamento e execução de skills de IA)
@@ -54,19 +56,12 @@ Garante o Docker configurado para inicialização automática no boot do sistema
 Configura e ativa o firewall nativo do Linux permitindo o tráfego apenas nas portas públicas do projeto:
 *   `22/tcp` (SSH)
 *   `80/tcp` & `443/tcp` (Traefik HTTP/HTTPS Let's Encrypt)
-*   `3000/tcp` (WhatsApp API - WAHA/GOWA)
+*   `3000/tcp` (WhatsApp API - WAHA)
 *   `18789/tcp` (OpenClaw UI)
 *   `8642/tcp` (Hermes API Gateway)
 *   `9119/tcp` (Hermes Dashboard)
 
-### 3.5 Escolha Interativa da API do WhatsApp
-Durante a execução, você escolherá de forma interativa qual API deseja utilizar:
-*   **[1] WAHA (Recomendado):** WhatsApp HTTP API leve, sem banco de dados local Postgres (economiza RAM), persistindo sessões em arquivo JSON em `./waha/sessions`.
-*   **[2] GOWA (Legado):** Go WhatsApp Multidevice tradicional, reativando os containers extras de banco de dados `postgres:15-alpine` para persistência das credenciais.
-
-O script copiará automaticamente o template correto (`docker-compose.waha.yml` ou `docker-compose.gowa.yml`) para o arquivo final `docker-compose.yml`.
-
-### 3.6 Instalação Automática do Catálogo de Skills
+### 3.5 Instalação Automática do Catálogo de Skills
 Clona e ativa as melhores skills do ecossistema do Hermes e OpenClaw diretamente no diretório de dados persistentes do agente:
 *   `clawsec` (Segurança, integridade de alma SOUL.md e drift detection)
 *   `hermes-core-skills` (25 habilidades utilitárias de desenvolvimento e análise)
@@ -97,10 +92,10 @@ ollama pull gemma4:e3b
 
 ---
 
-## 🚀 PASSO 5: Inicialização e Pareamento do WhatsApp
+## 🚀 PASSO 5: Inicialização e Pareamento do WhatsApp (WAHA)
 
 ### 5.1 Subir a Stack
-Inicie os containers configurados pelo script:
+Inicie os containers:
 ```bash
 docker compose up -d
 ```
@@ -115,8 +110,7 @@ ssh -N -L 3000:127.0.0.1:3000 root@IP_DA_SUA_VPS
 Agora, abra no seu navegador local:
 ➜ **`http://localhost:3000`**
 
-*   Se selecionou **WAHA**: Clique em `sessions` -> Inicie a sessão `default` -> Escaneie o QR Code no seu celular.
-*   Se selecionou **GOWA**: Escaneie o QR Code exibido diretamente no painel básico do GOWA.
+Acesse o dashboard do **WAHA** -> Clique em `sessions` -> Inicie a sessão `default` -> Escaneie o QR Code no seu celular.
 
 ---
 

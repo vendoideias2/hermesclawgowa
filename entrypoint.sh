@@ -56,10 +56,8 @@ if [ -z "${B2_BUCKET:-}" ] || [ -z "${B2_KEY_ID:-}" ] || [ -z "${B2_APP_KEY:-}" 
 fi
 register_mcp media-editor "{\"command\":\"/opt/middleware-venv/bin/python\",\"args\":[\"/app/middleware/media_editor_mcp.py\"],\"env\":{\"B2_KEY_ID\":\"${B2_KEY_ID:-}\",\"B2_APP_KEY\":\"${B2_APP_KEY:-}\",\"B2_BUCKET\":\"${B2_BUCKET:-}\",\"B2_ENDPOINT_URL\":\"${B2_ENDPOINT_URL:-}\"}}"
 
-# whatsapp: envia mensagens via GOWA (WhatsWeb), que roda como servico
-# separado no compose. O middleware alcanca a API em http://gowa:3000
-# (DNS de servico do compose).
-register_mcp whatsapp "{\"command\":\"/opt/middleware-venv/bin/python\",\"args\":[\"/app/middleware/whatsapp_gowa_mcp.py\"],\"env\":{\"GOWA_BASE_URL\":\"${GOWA_BASE_URL:-http://gowa:3000}\",\"GOWA_BASIC_AUTH\":\"${GOWA_BASIC_AUTH:-}\",\"GOWA_DEVICE_ID\":\"${GOWA_DEVICE_ID:-}\"}}"
+# whatsapp: envia mensagens via WAHA (WhatsApp HTTP API)
+register_mcp whatsapp "{\"command\":\"/opt/middleware-venv/bin/python\",\"args\":[\"/app/middleware/whatsapp_waha_mcp.py\"],\"env\":{\"GOWA_BASE_URL\":\"${GOWA_BASE_URL:-http://waha:3000}\",\"WAHA_API_KEY\":\"${WAHA_API_KEY:-}\",\"GOWA_DEVICE_ID\":\"${GOWA_DEVICE_ID:-}\"}}"
 
 # higgsfield: envelopa o CLI 'higgsfield' (geracao de imagem/video, soul-id) como
 # tools tipados. O CLI le o token de ~/.higgsfield -> passamos HOME=/root explicito
@@ -160,10 +158,10 @@ servers["media-editor"] = {
 }
 servers["whatsapp"] = {
     "command": PY,
-    "args": ["/app/middleware/whatsapp_gowa_mcp.py"],
+    "args": ["/app/middleware/whatsapp_waha_mcp.py"],
     "env": {
-        "GOWA_BASE_URL": os.environ.get("GOWA_BASE_URL", "http://gowa:3000"),
-        "GOWA_BASIC_AUTH": os.environ.get("GOWA_BASIC_AUTH", ""),
+        "GOWA_BASE_URL": os.environ.get("GOWA_BASE_URL", "http://waha:3000"),
+        "WAHA_API_KEY": os.environ.get("WAHA_API_KEY", ""),
         "GOWA_DEVICE_ID": os.environ.get("GOWA_DEVICE_ID", ""),
     },
 }
