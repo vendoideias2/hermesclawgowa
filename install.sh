@@ -5,12 +5,26 @@ set -euo pipefail
 # Garante que o script execute a partir do diretório onde está localizado
 cd "$(dirname "$0")"
 
+# Se .env.example não existir no diretório atual, localiza ou clona o repositório
+if [ ! -f .env.example ]; then
+  if [ -d "/root/hermesclawgowa" ]; then
+    cd "/root/hermesclawgowa"
+  elif [ -d "$PWD/hermesclawgowa" ]; then
+    cd "$PWD/hermesclawgowa"
+  else
+    if command -v git >/dev/null 2>&1; then
+      git clone https://github.com/vendoideias2/hermesclawgowa.git /root/hermesclawgowa
+      cd /root/hermesclawgowa
+    fi
+  fi
+fi
+
 # Cores
-C_GREEN="\033[32m"
-C_YELLOW="\033[33m"
-C_RED="\033[31m"
-C_BOLD="\033[1m"
-C_OFF="\033[0m"
+C_GREEN="$(printf '\033[32m')"
+C_YELLOW="$(printf '\033[33m')"
+C_RED="$(printf '\033[31m')"
+C_BOLD="$(printf '\033[1m')"
+C_OFF="$(printf '\033[0m')"
 
 info()  { printf '%s[install]%s %s\n' "$C_GREEN" "$C_OFF" "$*"; }
 warn()  { printf '%s[install]%s %s\n' "$C_YELLOW" "$C_OFF" "$*"; }
