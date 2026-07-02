@@ -1,23 +1,14 @@
 #!/usr/bin/env python3
-"""Bridge inbound do WhatsApp: GOWA (webhook) -> agente Hermes -> resposta.
+"""Bridge inbound do WhatsApp: WAHA (webhook) -> agente Hermes -> resposta.
 
-Fecha o ciclo do "canal" de WhatsApp (o envio já é coberto pelo MCP
-whatsapp_gowa_mcp.py). Fluxo:
+Fecha o ciclo do "canal" de WhatsApp. Fluxo:
 
-  WhatsApp -> GOWA (evento "message") --webhook POST--> ESTE bridge
+  WhatsApp -> WAHA (evento "message") --webhook POST--> ESTE bridge
            -> Hermes api_server (/v1/chat/completions, sessão por número)
-           -> GOWA (/send/message) -> WhatsApp
+           -> WAHA (/api/sendText) -> WhatsApp
 
 Roda como processo no container openclaw-vibestack (subido pelo entrypoint),
-escutando em 0.0.0.0:WA_BRIDGE_PORT — alcançável pelo gowa via DNS do
-compose (http://openclaw-vibestack:<porta>/webhook). Só stdlib (http.server +
-urllib), sem dependência nova.
-
-Mídia inbound (imagem/áudio): além de texto, o bridge processa imagem e áudio.
-Baixa os bytes da URL estática servida pelo GOWA, salva em _shared/assets/wa/ e
-manda pro modelo (Hermes multimodal: image_url/input_audio; OpenClaw: via arquivo).
-Se o modelo configurado não aceitar a modalidade, responde avisando que não
-comporta.
+escutando em 0.0.0.0:WA_BRIDGE_PORT.
 
 Env:
   WA_BRIDGE_PORT            porta do listener (default 8765; só rede interna do compose)
@@ -25,11 +16,11 @@ Env:
   WA_BRIDGE_UPSTREAM_KEY    Bearer do api_server (= HERMES_API_SERVER_KEY)
   WA_BRIDGE_MODEL           modelo exposto (default 'hermes-agent')
   WA_BRIDGE_SESSION_PREFIX  prefixo da sessão por contato (default 'wa')
-  WA_BRIDGE_ALLOWED_NUMBERS CSV de números permitidos (vazio = todos; recomendado preencher)
-  WA_BRIDGE_UPSTREAM_TIMEOUT timeout (s) da chamada ao agente (default 0 = ILIMITADO; localhost)
-  GOWA_BASE_URL             base do GOWA (default http://gowa:3000)
-  GOWA_BASIC_AUTH           auth opcional do painel/API (formato user:password)
-  GOWA_DEVICE_ID            ID do dispositivo/sessão (opcional, vira header X-Device-Id)
+  WA_BRIDGE_ALLOWED_NUMBERS CSV de números permitidos (vazio = todos)
+  WA_BRIDGE_UPSTREAM_TIMEOUT timeout (s) da chamada ao agente (default 0)
+  GOWA_BASE_URL             base do WAHA (default http://waha:3000)
+  WAHA_API_KEY              token de API do WAHA (opcional)
+  GOWA_DEVICE_ID            ID do dispositivo/sessão (default 'default')
 """
 import base64
 import json
@@ -43,7 +34,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-# Qual agente responde o canal: "hermes" (HTTP api_server) ou "openclaw" (CLI).
+# Qual agente responde o canal: "hermes" ou "openclaw".
 AGENT = os.environ.get("WA_BRIDGE_AGENT", "hermes").strip().lower()
 PORT = int(os.environ.get("WA_BRIDGE_PORT", "8765"))
 UPSTREAM = os.environ.get("WA_BRIDGE_UPSTREAM", "http://127.0.0.1:8642").rstrip("/")
@@ -53,13 +44,13 @@ SESSION_PREFIX = os.environ.get("WA_BRIDGE_SESSION_PREFIX", "wa")
 
 UPSTREAM_TIMEOUT = int(os.environ.get("WA_BRIDGE_UPSTREAM_TIMEOUT", "0"))
 _TIMEOUT = UPSTREAM_TIMEOUT if UPSTREAM_TIMEOUT > 0 else None
-ACK_AFTER = int(os.environ.get("WA_BRIDGE_ACK_AFTER", "20"))  # avisa "processando" se passar disso (0 = off)
+ACK_AFTER = int(os.environ.get("WA_BRIDGE_ACK_AFTER", "20"))
 
 OPENCLAW_AGENT_ID = os.environ.get("WA_BRIDGE_OPENCLAW_AGENT", "").strip()
 
-GOWA_BASE_URL = os.environ.get("GOWA_BASE_URL", "http://gowa:3000").rstrip("/")
-GOWA_BASIC_AUTH = os.environ.get("GOWA_BASIC_AUTH", "")
-GOWA_DEVICE_ID = os.environ.get("GOWA_DEVICE_ID", "")
+GOWA_BASE_URL = os.environ.get("GOWA_BASE_URL", "http://waha:3000").rstrip("/")
+API_KEY = os.environ.get("WAHA_API_KEY", "")
+GOWA_DEVICE_ID = os.environ.get("GOWA_DEVICE_ID", "default")
 
 # Allowlist de números
 _allowed_raw = os.environ.get("WA_BRIDGE_ALLOWED_NUMBERS", "").strip()
@@ -72,9 +63,9 @@ def _br_variants(num: str) -> set:
     if n.startswith("55"):
         ddd, rest = n[2:4], n[4:]
         if len(rest) == 9 and rest.startswith("9"):
-            out.add("55" + ddd + rest[1:])      # tira o 9
+            out.add("55" + ddd + rest[1:])
         elif len(rest) == 8:
-            out.add("55" + ddd + "9" + rest)     # poe o 9
+            out.add("55" + ddd + "9" + rest)
     return out
 
 
@@ -139,34 +130,29 @@ def _seen(msg_id: str) -> bool:
 
 
 def _digits(jid: str) -> str:
-    """Extrai número de JID '5511...@s.whatsapp.net'."""
+    """Extrai número de JID '5511...@c.us'."""
     head = re.split(r"[:@]", str(jid or ""), 1)[0]
     return re.sub(r"\D", "", head)
 
 
 def _headers() -> dict[str, str]:
     hdrs = {}
-    if GOWA_BASIC_AUTH:
-        auth_bytes = GOWA_BASIC_AUTH.encode("utf-8")
-        auth_b64 = base64.b64encode(auth_bytes).decode("utf-8")
-        hdrs["Authorization"] = f"Basic {auth_b64}"
-    if GOWA_DEVICE_ID:
-        hdrs["X-Device-Id"] = GOWA_DEVICE_ID
+    if API_KEY:
+        hdrs["Authorization"] = f"Bearer {API_KEY}"
     return hdrs
 
 
 def _extract(data: dict) -> dict | None:
-    """Parseia o payload de mensagem do webhook do GOWA."""
-    from_me = data.get("is_from_me", data.get("isFromMe", False))
+    """Parseia o payload de mensagem do webhook do WAHA."""
+    from_me = data.get("fromMe", False)
     if from_me:
         return None
 
-    chat_id = str(data.get("chat_id") or "")
+    chat_id = str(data.get("from") or "")
     if "@g.us" in chat_id or "@broadcast" in chat_id or "status@" in chat_id:
         return None
 
-    sender = data.get("from") or chat_id
-    number = _digits(sender)
+    number = _digits(chat_id)
     if not number:
         return None
 
@@ -174,38 +160,30 @@ def _extract(data: dict) -> dict | None:
     text = data.get("body") or ""
 
     media = None
-    media_kinds = ["image", "audio", "video", "document"]
-    for kind in media_kinds:
-        media_obj = data.get(kind)
-        if media_obj:
-            if isinstance(media_obj, dict):
-                path = media_obj.get("path") or ""
-                caption = media_obj.get("caption") or ""
-            else:
-                path = str(media_obj)
-                caption = ""
+    media_obj = data.get("media")
+    if media_obj and isinstance(media_obj, dict):
+        url = media_obj.get("url")
+        mimetype = media_obj.get("mimetype") or ""
+        filename = media_obj.get("filename") or ""
+        
+        kind = "image"
+        if "audio" in mimetype:
+            kind = "audio"
+        elif "video" in mimetype:
+            kind = "video"
+        elif "application" in mimetype or "text" in mimetype:
+            kind = "document"
             
-            if path:
-                ext = path.split(".")[-1].lower() if "." in path else ""
-                mime = "application/octet-stream"
-                for m_name, m_ext in _MIME_EXT.items():
-                    if m_ext == ext:
-                        mime = m_name
-                        break
-                
-                # O arquivo é servido estaticamente pelo GOWA
-                media_url = f"{GOWA_BASE_URL}/{path.lstrip('/')}"
-                media = {
-                    "kind": kind,
-                    "caption": str(caption or ""),
-                    "mimetype": mime,
-                    "media_url": media_url,
-                    "base64": None,
-                    "message": data,
-                    "msg_id": msg_id,
-                }
-                text = str(caption or text)
-                break
+        if url:
+            media = {
+                "kind": kind,
+                "caption": str(text or ""),
+                "mimetype": mimetype,
+                "media_url": url,
+                "base64": None,
+                "message": data,
+                "msg_id": msg_id,
+            }
 
     return {"number": number, "text": str(text), "msg_id": msg_id, "media": media}
 
@@ -278,15 +256,19 @@ def _ask_agent(number: str, text: str) -> str:
 
 
 def _send_whatsapp(number: str, text: str) -> None:
-    """Envia a resposta de volta pelo GOWA (/send/message)."""
-    phone = f"{number}@s.whatsapp.net"
-    body = json.dumps({"phone": phone, "message": text}).encode("utf-8")
+    """Envia a resposta de volta pelo WAHA (/api/sendText)."""
+    phone = f"{number}@c.us"
+    body = json.dumps({
+        "chatId": phone,
+        "text": text,
+        "session": GOWA_DEVICE_ID or "default"
+    }).encode("utf-8")
     
     headers = _headers()
     headers["Content-Type"] = "application/json"
     
     req = urllib.request.Request(
-        f"{GOWA_BASE_URL}/send/message",
+        f"{GOWA_BASE_URL}/api/sendText",
         data=body,
         method="POST",
         headers=headers,
@@ -480,7 +462,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return
         
-        # O GOWA envia o webhook com event == "message"
+        # WAHA envia o webhook com event == "message"
         event = str(payload.get("event") or "").lower()
         if event != "message":
             return
@@ -518,20 +500,39 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def _provision() -> None:
-    """Tenta reconectar o dispositivo no boot se o GOWA estiver pronto."""
+    """Tenta inicializar a sessão no WAHA no boot se estiver pronto."""
     if not GOWA_BASE_URL:
         return
     for attempt in range(1, 31):
         try:
             dev_id = GOWA_DEVICE_ID or "default"
+            # Cria a sessão
             headers = _headers()
-            req = urllib.request.Request(f"{GOWA_BASE_URL}/app/reconnect?device_id={dev_id}", headers=headers)
+            headers["Content-Type"] = "application/json"
+            body = json.dumps({
+                "name": dev_id,
+                "config": {
+                    "webhooks": [
+                        {
+                            "url": f"http://openclaw-vibestack:{PORT}/webhook",
+                            "events": ["message"]
+                        }
+                    ]
+                }
+            }).encode("utf-8")
+            req = urllib.request.Request(f"{GOWA_BASE_URL}/api/sessions", data=body, method="POST", headers=headers)
             with urllib.request.urlopen(req, timeout=10) as resp:
                 resp.read()
-            _log(f"dispositivo '{dev_id}' do GOWA reconectado com sucesso.")
+            
+            # Start a sessão
+            req_start = urllib.request.Request(f"{GOWA_BASE_URL}/api/sessions/{dev_id}/start", method="POST", headers=_headers())
+            with urllib.request.urlopen(req_start, timeout=10) as resp_start:
+                resp_start.read()
+                
+            _log(f"Sessão '{dev_id}' do WAHA provisionada com sucesso.")
             return
         except Exception as e:
-            _log(f"aguardando GOWA... ({e}) (tentativa {attempt})")
+            _log(f"aguardando WAHA... ({e}) (tentativa {attempt})")
         time.sleep(10)
 
 
