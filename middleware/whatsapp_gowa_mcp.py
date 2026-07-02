@@ -40,7 +40,7 @@ def _headers() -> dict[str, str]:
     """Retorna os headers padrão do WAHA."""
     hdrs = {}
     if API_KEY:
-        hdrs["Authorization"] = f"Bearer {API_KEY}"
+        hdrs["X-Api-Key"] = API_KEY
     return hdrs
 
 

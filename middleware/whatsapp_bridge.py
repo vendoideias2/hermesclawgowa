@@ -138,7 +138,7 @@ def _digits(jid: str) -> str:
 def _headers() -> dict[str, str]:
     hdrs = {}
     if API_KEY:
-        hdrs["Authorization"] = f"Bearer {API_KEY}"
+        hdrs["X-Api-Key"] = API_KEY
     return hdrs
 
 
