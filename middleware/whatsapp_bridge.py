@@ -48,9 +48,13 @@ ACK_AFTER = int(os.environ.get("WA_BRIDGE_ACK_AFTER", "20"))
 
 OPENCLAW_AGENT_ID = os.environ.get("WA_BRIDGE_OPENCLAW_AGENT", "").strip()
 
-GOWA_BASE_URL = os.environ.get("GOWA_BASE_URL", "http://waha:3000").rstrip("/")
+WAHA_BASE_URL = os.environ.get("WAHA_BASE_URL", "http://waha:3000").rstrip("/")
 API_KEY = os.environ.get("WAHA_API_KEY", "")
-GOWA_DEVICE_ID = os.environ.get("GOWA_DEVICE_ID", "default")
+WAHA_DEVICE_ID = os.environ.get("WAHA_DEVICE_ID", "default")
+
+# Compatibilidade interna
+GOWA_BASE_URL = WAHA_BASE_URL
+GOWA_DEVICE_ID = WAHA_DEVICE_ID
 
 # Allowlist de números
 _allowed_raw = os.environ.get("WA_BRIDGE_ALLOWED_NUMBERS", "").strip()

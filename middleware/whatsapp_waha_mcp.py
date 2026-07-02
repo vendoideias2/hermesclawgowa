@@ -21,9 +21,9 @@ from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("whatsapp-mcp")
 
-BASE_URL = os.environ.get("GOWA_BASE_URL", "http://waha:3000").rstrip("/")
+BASE_URL = os.environ.get("WAHA_BASE_URL", "http://waha:3000").rstrip("/")
 API_KEY = os.environ.get("WAHA_API_KEY", "")
-DEVICE_ID = os.environ.get("GOWA_DEVICE_ID", "default")
+DEVICE_ID = os.environ.get("WAHA_DEVICE_ID", "default")
 
 
 def _normalize_phone(phone: str) -> str:

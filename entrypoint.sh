@@ -57,7 +57,7 @@ fi
 register_mcp media-editor "{\"command\":\"/opt/middleware-venv/bin/python\",\"args\":[\"/app/middleware/media_editor_mcp.py\"],\"env\":{\"B2_KEY_ID\":\"${B2_KEY_ID:-}\",\"B2_APP_KEY\":\"${B2_APP_KEY:-}\",\"B2_BUCKET\":\"${B2_BUCKET:-}\",\"B2_ENDPOINT_URL\":\"${B2_ENDPOINT_URL:-}\"}}"
 
 # whatsapp: envia mensagens via WAHA (WhatsApp HTTP API)
-register_mcp whatsapp "{\"command\":\"/opt/middleware-venv/bin/python\",\"args\":[\"/app/middleware/whatsapp_waha_mcp.py\"],\"env\":{\"GOWA_BASE_URL\":\"${GOWA_BASE_URL:-http://waha:3000}\",\"WAHA_API_KEY\":\"${WAHA_API_KEY:-}\",\"GOWA_DEVICE_ID\":\"${GOWA_DEVICE_ID:-}\"}}"
+register_mcp whatsapp "{\"command\":\"/opt/middleware-venv/bin/python\",\"args\":[\"/app/middleware/whatsapp_waha_mcp.py\"],\"env\":{\"WAHA_BASE_URL\":\"${WAHA_BASE_URL:-http://waha:3000}\",\"WAHA_API_KEY\":\"${WAHA_API_KEY:-}\",\"WAHA_DEVICE_ID\":\"${WAHA_DEVICE_ID:-}\"}}"
 
 # higgsfield: envelopa o CLI 'higgsfield' (geracao de imagem/video, soul-id) como
 # tools tipados. O CLI le o token de ~/.higgsfield -> passamos HOME=/root explicito
@@ -104,9 +104,10 @@ ATLASCLOUD_API_KEY="${ATLASCLOUD_API_KEY:-}" \
 B2_KEY_ID="${B2_KEY_ID:-}" \
 B2_APP_KEY="${B2_APP_KEY:-}" \
 B2_BUCKET="${B2_BUCKET:-}" \
-GOWA_BASE_URL="${GOWA_BASE_URL:-http://gowa:3000}" \
-GOWA_BASIC_AUTH="${GOWA_BASIC_AUTH:-}" \
-GOWA_DEVICE_ID="${GOWA_DEVICE_ID:-}" \
+WAHA_BASE_URL="${WAHA_BASE_URL:-http://waha:3000}" \
+WAHA_DEVICE_ID="${WAHA_DEVICE_ID:-}" \
+GOWA_BASE_URL="${WAHA_BASE_URL:-http://waha:3000}" \
+GOWA_DEVICE_ID="${WAHA_DEVICE_ID:-}" \
 HERMES_APPROVALS_MODE="${HERMES_APPROVALS_MODE:-off}" \
 /opt/hermes-agent/venv/bin/python - <<'PYEOF'
 import os, sys
@@ -160,9 +161,9 @@ servers["whatsapp"] = {
     "command": PY,
     "args": ["/app/middleware/whatsapp_waha_mcp.py"],
     "env": {
-        "GOWA_BASE_URL": os.environ.get("GOWA_BASE_URL", "http://waha:3000"),
+        "WAHA_BASE_URL": os.environ.get("WAHA_BASE_URL", "http://waha:3000"),
         "WAHA_API_KEY": os.environ.get("WAHA_API_KEY", ""),
-        "GOWA_DEVICE_ID": os.environ.get("GOWA_DEVICE_ID", ""),
+        "WAHA_DEVICE_ID": os.environ.get("WAHA_DEVICE_ID", ""),
     },
 }
 servers["higgsfield"] = {
@@ -289,9 +290,8 @@ if [ "$WA_BRIDGE_AGENT" = "openclaw" ] || [ -n "${API_SERVER_KEY:-}" ]; then
     WA_BRIDGE_UPSTREAM_TIMEOUT="${WA_BRIDGE_UPSTREAM_TIMEOUT:-0}" \
     WA_BRIDGE_ACK_AFTER="${WA_BRIDGE_ACK_AFTER:-20}" \
     WA_BRIDGE_PUBLIC_URL="${WA_BRIDGE_PUBLIC_URL:-http://openclaw-vibestack:${WA_BRIDGE_PORT:-8765}/webhook}" \
-    GOWA_BASE_URL="${GOWA_BASE_URL:-http://gowa:3000}" \
-    GOWA_BASIC_AUTH="${GOWA_BASIC_AUTH:-}" \
-    GOWA_DEVICE_ID="${GOWA_DEVICE_ID:-}" \
+    WAHA_BASE_URL="${WAHA_BASE_URL:-http://waha:3000}" \
+    WAHA_DEVICE_ID="${WAHA_DEVICE_ID:-}" \
       /opt/middleware-venv/bin/python /app/middleware/whatsapp_bridge.py
   ) >/var/log/whatsapp-bridge.log 2>&1 &
   WA_BRIDGE_PID=$!

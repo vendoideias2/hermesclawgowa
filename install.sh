@@ -131,8 +131,8 @@ set_var() {
 # Define defaults de sistema silenciosamente
 set_var DOMAIN "vendoideias.com"
 set_var DEFAULT_MODEL "phi4:mini"
-set_var WHATSAPP_API "waha"
-set_var GOWA_BASE_URL "http://waha:3000"
+set_var WAHA_BASE_URL "http://waha:3000"
+set_var WAHA_DEVICE_ID "default"
 
 # Perguntas interativas — SOMENTE NAS APIS
 info "Preencha as chaves de API correspondentes abaixo (pressione Enter para pular/manter padrão):"
@@ -156,9 +156,9 @@ b2_ep=$(ask "B2_ENDPOINT_URL (Backblaze Endpoint)" "$(get_var B2_ENDPOINT_URL)")
 set_var B2_ENDPOINT_URL "$b2_ep"
 
 # WAHA/WhatsApp API
-waha_pass=$(ask "GOWA_BASIC_AUTH_PASS (Senha para o Painel Web, user:pass ou pass)" "$(get_var GOWA_BASIC_AUTH_PASS)")
+waha_pass=$(ask "Senha do Dashboard do WAHA (Basic Auth)" "$(get_var WAHA_BASIC_AUTH)")
 [ -z "$waha_pass" ] && waha_pass="admin:senha_forte_123"
-set_var GOWA_BASIC_AUTH_PASS "$waha_pass"
+set_var WAHA_BASIC_AUTH "$waha_pass"
 
 wa_num=$(ask "WA_BRIDGE_ALLOWED_NUMBERS (Seu número com DDI/DDD para testes)" "$(get_var WA_BRIDGE_ALLOWED_NUMBERS)")
 set_var WA_BRIDGE_ALLOWED_NUMBERS "$wa_num"
