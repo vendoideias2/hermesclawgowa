@@ -156,9 +156,6 @@ b2_ep=$(ask "B2_ENDPOINT_URL (Backblaze Endpoint)" "$(get_var B2_ENDPOINT_URL)")
 set_var B2_ENDPOINT_URL "$b2_ep"
 
 # WAHA/WhatsApp API
-waha_key=$(ask "WAHA_API_KEY (Chave de API do WAHA)" "$(get_var WAHA_API_KEY)")
-set_var WAHA_API_KEY "$waha_key"
-
 waha_pass=$(ask "GOWA_BASIC_AUTH_PASS (Senha para o Painel Web, user:pass ou pass)" "$(get_var GOWA_BASIC_AUTH_PASS)")
 [ -z "$waha_pass" ] && waha_pass="admin:senha_forte_123"
 set_var GOWA_BASIC_AUTH_PASS "$waha_pass"
@@ -170,7 +167,7 @@ set_var WA_BRIDGE_ALLOWED_NUMBERS "$wa_num"
 step "Configurando Segredos (Automático)"
 gen_secret() { python3 -c "import secrets; print(secrets.token_hex(32))"; }
 
-for key in OPENCLAW_GATEWAY_TOKEN GOG_KEYRING_PASSWORD HERMES_API_SERVER_KEY; do
+for key in OPENCLAW_GATEWAY_TOKEN GOG_KEYRING_PASSWORD HERMES_API_SERVER_KEY WAHA_API_KEY; do
   val=$(get_var "$key")
   if [ -z "$val" ]; then
     set_var "$key" "$(gen_secret)"
@@ -221,4 +218,9 @@ if command -v ufw >/dev/null 2>&1; then
 fi
 
 step "Instalação finalizada com sucesso!"
+info "Credenciais de API e Acesso geradas automaticamente (salvas em .env):"
+echo "  OPENCLAW_GATEWAY_TOKEN  = $(get_var OPENCLAW_GATEWAY_TOKEN)"
+echo "  HERMES_API_SERVER_KEY   = $(get_var HERMES_API_SERVER_KEY)"
+echo "  WAHA_API_KEY            = $(get_var WAHA_API_KEY)"
+echo ""
 info "Você pode rodar 'docker compose up -d' para iniciar a stack com o WAHA."
