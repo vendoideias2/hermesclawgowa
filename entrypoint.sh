@@ -56,12 +56,10 @@ if [ -z "${B2_BUCKET:-}" ] || [ -z "${B2_KEY_ID:-}" ] || [ -z "${B2_APP_KEY:-}" 
 fi
 register_mcp media-editor "{\"command\":\"/opt/middleware-venv/bin/python\",\"args\":[\"/app/middleware/media_editor_mcp.py\"],\"env\":{\"B2_KEY_ID\":\"${B2_KEY_ID:-}\",\"B2_APP_KEY\":\"${B2_APP_KEY:-}\",\"B2_BUCKET\":\"${B2_BUCKET:-}\",\"B2_ENDPOINT_URL\":\"${B2_ENDPOINT_URL:-}\"}}"
 
-# whatsapp: envia mensagens via GOWA, WAHA ou Evolution API
-if [ "${WHATSAPP_API:-waha}" = "evolution" ]; then
-  register_mcp whatsapp "{\"command\":\"/opt/middleware-venv/bin/python\",\"args\":[\"/app/middleware/whatsapp_evolution_mcp.py\"],\"env\":{\"EVOLUTION_BASE_URL\":\"${EVOLUTION_BASE_URL:-http://evolution-go:8080}\",\"EVOLUTION_API_KEY\":\"${EVOLUTION_API_KEY:-}\",\"EVOLUTION_INSTANCE_TOKEN\":\"${EVOLUTION_INSTANCE_TOKEN:-}\",\"EVOLUTION_INSTANCE\":\"${EVOLUTION_INSTANCE:-vibestack}\"}}"
-else
-  register_mcp whatsapp "{\"command\":\"/opt/middleware-venv/bin/python\",\"args\":[\"/app/middleware/whatsapp_gowa_mcp.py\"],\"env\":{\"WHATSAPP_API\":\"${WHATSAPP_API:-waha}\",\"GOWA_BASE_URL\":\"${GOWA_BASE_URL:-http://waha:3000}\",\"WAHA_API_KEY\":\"${WAHA_API_KEY:-}\",\"GOWA_BASIC_AUTH\":\"${GOWA_BASIC_AUTH:-}\",\"GOWA_DEVICE_ID\":\"${GOWA_DEVICE_ID:-}\"}}"
-fi
+# whatsapp: envia mensagens via GOWA (WhatsWeb), que roda como servico
+# separado no compose. O middleware alcanca a API em http://gowa:3000
+# (DNS de servico do compose).
+register_mcp whatsapp "{\"command\":\"/opt/middleware-venv/bin/python\",\"args\":[\"/app/middleware/whatsapp_gowa_mcp.py\"],\"env\":{\"GOWA_BASE_URL\":\"${GOWA_BASE_URL:-http://gowa:3000}\",\"GOWA_BASIC_AUTH\":\"${GOWA_BASIC_AUTH:-}\",\"GOWA_DEVICE_ID\":\"${GOWA_DEVICE_ID:-}\"}}"
 
 # higgsfield: envelopa o CLI 'higgsfield' (geracao de imagem/video, soul-id) como
 # tools tipados. O CLI le o token de ~/.higgsfield -> passamos HOME=/root explicito
@@ -160,30 +158,15 @@ servers["media-editor"] = {
         "B2_ENDPOINT_URL": os.environ.get("B2_ENDPOINT_URL", ""),
     },
 }
-wa_api = os.environ.get("WHATSAPP_API", "waha").strip().lower()
-if wa_api == "evolution":
-    servers["whatsapp"] = {
-        "command": PY,
-        "args": ["/app/middleware/whatsapp_evolution_mcp.py"],
-        "env": {
-            "EVOLUTION_BASE_URL": os.environ.get("EVOLUTION_BASE_URL", "http://evolution-go:8080"),
-            "EVOLUTION_API_KEY": os.environ.get("EVOLUTION_API_KEY", ""),
-            "EVOLUTION_INSTANCE_TOKEN": os.environ.get("EVOLUTION_INSTANCE_TOKEN", ""),
-            "EVOLUTION_INSTANCE": os.environ.get("EVOLUTION_INSTANCE", "vibestack"),
-        },
-    }
-else:
-    servers["whatsapp"] = {
-        "command": PY,
-        "args": ["/app/middleware/whatsapp_gowa_mcp.py"],
-        "env": {
-            "WHATSAPP_API": wa_api,
-            "GOWA_BASE_URL": os.environ.get("GOWA_BASE_URL", "http://waha:3000" if wa_api == "waha" else "http://gowa:3000"),
-            "WAHA_API_KEY": os.environ.get("WAHA_API_KEY", ""),
-            "GOWA_BASIC_AUTH": os.environ.get("GOWA_BASIC_AUTH", ""),
-            "GOWA_DEVICE_ID": os.environ.get("GOWA_DEVICE_ID", ""),
-        },
-    }
+servers["whatsapp"] = {
+    "command": PY,
+    "args": ["/app/middleware/whatsapp_gowa_mcp.py"],
+    "env": {
+        "GOWA_BASE_URL": os.environ.get("GOWA_BASE_URL", "http://gowa:3000"),
+        "GOWA_BASIC_AUTH": os.environ.get("GOWA_BASIC_AUTH", ""),
+        "GOWA_DEVICE_ID": os.environ.get("GOWA_DEVICE_ID", ""),
+    },
+}
 servers["higgsfield"] = {
     "command": PY,
     "args": ["/app/middleware/higgsfield_cli_mcp.py"],
@@ -298,10 +281,6 @@ echo "[entrypoint] socat bridge 0.0.0.0:$HERMES_WEB_PUBLIC_PORT -> 127.0.0.1:$HE
 WA_BRIDGE_AGENT="${WA_BRIDGE_AGENT:-hermes}"
 if [ "$WA_BRIDGE_AGENT" = "openclaw" ] || [ -n "${API_SERVER_KEY:-}" ]; then
   (
-    BRIDGE_SCRIPT="/app/middleware/whatsapp_bridge.py"
-    if [ "${WHATSAPP_API:-waha}" = "evolution" ]; then
-      BRIDGE_SCRIPT="/app/middleware/whatsapp_bridge_evolution.py"
-    fi
     WA_BRIDGE_AGENT="$WA_BRIDGE_AGENT" \
     WA_BRIDGE_PORT="${WA_BRIDGE_PORT:-8765}" \
     WA_BRIDGE_UPSTREAM="${WA_BRIDGE_UPSTREAM:-http://127.0.0.1:${HERMES_API_PORT:-8642}}" \
@@ -312,17 +291,13 @@ if [ "$WA_BRIDGE_AGENT" = "openclaw" ] || [ -n "${API_SERVER_KEY:-}" ]; then
     WA_BRIDGE_UPSTREAM_TIMEOUT="${WA_BRIDGE_UPSTREAM_TIMEOUT:-0}" \
     WA_BRIDGE_ACK_AFTER="${WA_BRIDGE_ACK_AFTER:-20}" \
     WA_BRIDGE_PUBLIC_URL="${WA_BRIDGE_PUBLIC_URL:-http://openclaw-vibestack:${WA_BRIDGE_PORT:-8765}/webhook}" \
-    GOWA_BASE_URL="${GOWA_BASE_URL:-http://waha:3000}" \
+    GOWA_BASE_URL="${GOWA_BASE_URL:-http://gowa:3000}" \
     GOWA_BASIC_AUTH="${GOWA_BASIC_AUTH:-}" \
     GOWA_DEVICE_ID="${GOWA_DEVICE_ID:-}" \
-    EVOLUTION_BASE_URL="${EVOLUTION_BASE_URL:-http://evolution-go:8080}" \
-    EVOLUTION_API_KEY="${EVOLUTION_API_KEY:-}" \
-    EVOLUTION_INSTANCE_TOKEN="${EVOLUTION_INSTANCE_TOKEN:-}" \
-    EVOLUTION_INSTANCE="${EVOLUTION_INSTANCE:-vibestack}" \
-      /opt/middleware-venv/bin/python "$BRIDGE_SCRIPT"
+      /opt/middleware-venv/bin/python /app/middleware/whatsapp_bridge.py
   ) >/var/log/whatsapp-bridge.log 2>&1 &
   WA_BRIDGE_PID=$!
-  echo "[entrypoint] whatsapp bridge ($BRIDGE_SCRIPT) iniciado em 0.0.0.0:${WA_BRIDGE_PORT:-8765} (agente=$WA_BRIDGE_AGENT, pid=$WA_BRIDGE_PID, log=/var/log/whatsapp-bridge.log)"
+  echo "[entrypoint] whatsapp bridge iniciado em 0.0.0.0:${WA_BRIDGE_PORT:-8765} (agente=$WA_BRIDGE_AGENT, pid=$WA_BRIDGE_PID, log=/var/log/whatsapp-bridge.log)"
 else
   echo "[entrypoint] whatsapp bridge NAO subiu (faltou API_SERVER_KEY no modo hermes) — canal inbound desligado, envio via MCP segue ok."
 fi
