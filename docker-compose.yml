@@ -61,7 +61,7 @@ services:
       - "${OPENCLAW_GATEWAY_PORT:-18789}"
       - "--allow-unconfigured"
       - "--auth"
-      - "none"
+      - "${OPENCLAW_GATEWAY_AUTH:-token}"
 
   # ============================================================
   # WhatsApp backend — WAHA (WhatsApp HTTP API).
@@ -76,7 +76,7 @@ services:
       - WHATSAPP_HOOK_URL=http://openclaw-vibestack:${WA_BRIDGE_PORT:-8765}/webhook
       - WHATSAPP_HOOK_EVENTS=message
     volumes:
-      - ./waha/sessions:/app/.sessions
+      - waha_sessions:/app/.sessions
     ports:
       - "127.0.0.1:${GOWA_PORT:-3000}:3000"
     networks:
@@ -84,3 +84,6 @@ services:
 
 networks:
   default:
+
+volumes:
+  waha_sessions:

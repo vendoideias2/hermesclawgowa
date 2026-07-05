@@ -1,13 +1,11 @@
 # syntax=docker/dockerfile:1.6
-FROM node:24-bookworm
+FROM ghcr.io/openclaw/openclaw:latest
 
-ARG OPENCLAW_REPO=https://github.com/openclaw/openclaw.git
-ARG OPENCLAW_REF=main
+USER root
 ENV HOME=/root
-ENV NODE_OPTIONS="--max-old-space-size=3072"
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates curl socat zstd python3 python3-pip ffmpeg ripgrep \
+ && apt-get install -y --no-install-recommends git ca-certificates curl socat zstd python3 python3-pip ffmpeg ripgrep build-essential python3-dev \
  && rm -rf /var/lib/apt/lists/*
 
 # uv: instala Python 3.12 inline (bookworm so traz ate 3.11).
@@ -112,17 +110,6 @@ RUN curl -fL "https://github.com/openclaw/wacli/releases/download/v${WACLI_VERSI
 
 WORKDIR /app
 
-# Clona o source do openclaw na versão escolhida (branch, tag ou commit leve)
-RUN git clone --depth 1 --branch "${OPENCLAW_REF}" "${OPENCLAW_REPO}" /tmp/openclaw \
- && cp -a /tmp/openclaw/. /app/ \
- && rm -rf /tmp/openclaw
-
-RUN corepack enable \
- && pnpm install --frozen-lockfile \
- && pnpm build \
- && pnpm ui:install \
- && pnpm ui:build
-
 # Wrapper para usar `openclaw <comando>` em vez de `node dist/index.js <comando>`
 RUN printf '#!/bin/sh\nexec node /app/dist/index.js "$@"\n' > /usr/local/bin/openclaw \
  && chmod +x /usr/local/bin/openclaw
@@ -154,13 +141,13 @@ RUN cd /opt/hermes-agent && npx --yes playwright install --with-deps chromium
 # Compila pra hermes_cli/web_dist (mesmo comando do erro de --skip-build do
 # Hermes). Assim o entrypoint sobe a UI rapido; sem isso ele compilaria a cada
 # boot. Se a UI nao precisar rebuild, o helper interno do Hermes pula sozinho.
-RUN cd /opt/hermes-agent/web && npm install && npm run build
+RUN cd /opt/hermes-agent/web && npm install --include=dev && npm run build
 
 # Pre-build do TUI (ui-tui) que a aba "Chat" do dashboard spawna via `hermes --tui`.
 # Sem isso, o 1o `hermes --tui` (inclusive o que a aba Chat dispara) faz npm
 # install + build em runtime — o que derruba o WebSocket do chat por timeout/erro.
 # Gera ui-tui/dist/entry.js; em runtime o Hermes detecta que ja' esta' buildado e pula.
-RUN cd /opt/hermes-agent/ui-tui && npm install && npm run build
+RUN cd /opt/hermes-agent/ui-tui && npm install --include=dev && npm run build
 
 # Wrapper: limpa PYTHONPATH/PYTHONHOME (igual ao install.sh oficial, pra nao
 # herdar o venv do middleware/uv) e exec o hermes do venv do Hermes.

@@ -525,8 +525,19 @@ def _provision() -> None:
                 }
             }).encode("utf-8")
             req = urllib.request.Request(f"{GOWA_BASE_URL}/api/sessions", data=body, method="POST", headers=headers)
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                resp.read()
+            try:
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    resp.read()
+            except urllib.error.HTTPError as he:
+                if he.code == 422:
+                    # Fallback para o body básico (WAHA Core / sem suporte a webhook dinâmico)
+                    _log(f"Configuração dinâmica de webhook não suportada pelo WAHA (HTTP 422). Tentando criar sessão básica '{dev_id}'...")
+                    body_basic = json.dumps({"name": dev_id}).encode("utf-8")
+                    req_basic = urllib.request.Request(f"{GOWA_BASE_URL}/api/sessions", data=body_basic, method="POST", headers=headers)
+                    with urllib.request.urlopen(req_basic, timeout=10) as resp_basic:
+                        resp_basic.read()
+                else:
+                    raise he
             
             # Start a sessão
             req_start = urllib.request.Request(f"{GOWA_BASE_URL}/api/sessions/{dev_id}/start", method="POST", headers=_headers())
